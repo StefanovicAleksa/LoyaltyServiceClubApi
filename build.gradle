@@ -1,0 +1,54 @@
+plugins {
+	id 'java'
+	id 'org.springframework.boot' version '3.5.0'
+	id 'io.spring.dependency-management' version '1.1.7'
+	id 'org.flywaydb.flyway' version '9.22.3'
+}
+
+group = 'com.bizwaresol'
+version = '0.0.1-SNAPSHOT'
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(22)
+	}
+}
+
+repositories {
+	mavenCentral()
+}
+
+dependencies {
+	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+	implementation 'org.springframework.boot:spring-boot-starter-web'
+	implementation 'org.flywaydb:flyway-core'
+	developmentOnly 'org.springframework.boot:spring-boot-devtools'
+	runtimeOnly 'org.postgresql:postgresql'
+	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+	useJUnitPlatform()
+}
+
+flyway {
+	url = 'jdbc:postgresql://localhost:5432/loyalty_service_club'
+	user = 'loyalty_service_club_admin'
+	password = 'Loyalty16'
+
+	// Include ALL migration folders
+	locations = [
+			'classpath:db/migration/tables',
+			'classpath:db/migration/indexes',
+			'classpath:db/migration/views',
+			'classpath:db/migration/triggers',
+			'classpath:db/migration/seed',
+			'classpath:db/migration/enums'
+	]
+
+	schemas = ['public']
+	baselineOnMigrate = true
+	cleanDisabled = false
+	validateOnMigrate = true
+}
