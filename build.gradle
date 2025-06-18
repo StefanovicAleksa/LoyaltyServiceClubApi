@@ -37,18 +37,91 @@ flyway {
 	user = 'loyalty_service_club_admin'
 	password = 'Loyalty16'
 
-	// Include ALL migration folders
+	// Match your actual directory structure
 	locations = [
+			'classpath:db/migration/enums',
 			'classpath:db/migration/tables',
-			'classpath:db/migration/indexes',
-			'classpath:db/migration/views',
-			'classpath:db/migration/triggers',
-			'classpath:db/migration/seed',
-			'classpath:db/migration/enums'
+			'classpath:db/migration/indexes'
 	]
 
 	schemas = ['public']
-	baselineOnMigrate = true
 	cleanDisabled = false
 	validateOnMigrate = true
+}
+
+// Task to reset database with proper permissions
+tasks.register('resetDatabase', Exec) {
+	group = 'flyway'
+	description = 'Drops and recreates the database schema with proper privileges'
+
+	// Use postgres superuser to drop/create schema, then grant permissions
+	commandLine('psql',
+			'-h', 'localhost',
+			'-U', 'postgres',  // Use postgres superuser
+			'-d', 'loyalty_service_club',
+			'-c', '''
+              DROP SCHEMA IF EXISTS public CASCADE; 
+              CREATE SCHEMA public; 
+              
+              -- Grant schema privileges
+              GRANT ALL ON SCHEMA public TO loyalty_service_club_admin; 
+              GRANT ALL ON SCHEMA public TO public;
+              ALTER SCHEMA public OWNER TO loyalty_service_club_admin;
+              
+              -- Grant default privileges for future objects
+              ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO loyalty_service_club_admin;
+              ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO loyalty_service_club_admin;
+              ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO loyalty_service_club_admin;
+              
+              -- Ensure loyalty_service_club_admin can create objects
+              GRANT CREATE ON DATABASE loyalty_service_club TO loyalty_service_club_admin;
+          ''')
+
+	doFirst {
+		println("🗑️  Dropping and recreating database schema...")
+	}
+
+	doLast {
+		println("✅ Database schema reset complete with full privileges restored")
+	}
+}
+
+// Task to clean build and force rebuild of resources
+tasks.register('cleanBuildResources') {
+	group = 'build'
+	description = 'Clean build directory and force rebuild of migration resources'
+
+	doFirst {
+		delete(fileTree('build'))
+		println("🧹 Cleaned entire build directory")
+	}
+}
+
+// Main fresh migration task
+tasks.register('flywayFresh') {
+	group = 'flyway'
+	description = 'Complete fresh migration: clean build + reset DB + migrate (like Laravel migrate:fresh)'
+
+	// Dependencies in correct order
+	dependsOn('cleanBuildResources')
+	dependsOn('assemble')  // Build without tests
+	dependsOn('resetDatabase')
+	finalizedBy('flywayMigrate')
+
+	doLast {
+		println("🚀 Fresh migration complete! All current migrations applied.")
+	}
+}
+
+// Configure task execution order - MUST be at the end of the file
+afterEvaluate {
+	tasks.named('assemble').configure {
+		mustRunAfter('cleanBuildResources')
+	}
+	tasks.named('resetDatabase').configure {
+		mustRunAfter('assemble')
+	}
+	tasks.named('flywayMigrate').configure {
+		mustRunAfter('resetDatabase')
+	}
 }
