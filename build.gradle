@@ -41,7 +41,10 @@ flyway {
 	locations = [
 			'classpath:db/migration/enums',
 			'classpath:db/migration/tables',
-			'classpath:db/migration/indexes'
+			'classpath:db/migration/indexes',
+			'classpath:db/migration/functions',
+			'classpath:db/migration/triggers',
+			'classpath:db/migration/views'
 	]
 
 	schemas = ['public']

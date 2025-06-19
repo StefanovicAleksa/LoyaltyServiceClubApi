@@ -1,4 +1,4 @@
--- V011__create_customer_phones_table.sql
+-- V051__create_customer_phones_table.sql
 -- Customer phone numbers with verification status
 
 CREATE TABLE customer_phones

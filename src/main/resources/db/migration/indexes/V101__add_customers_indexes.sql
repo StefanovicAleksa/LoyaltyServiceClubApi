@@ -1,4 +1,4 @@
--- V051__add_customers_indexes.sql
+-- V101__add_customers_indexes.sql
 -- Indexes for customers table
 
 -- Foreign key indexes (critical for JOIN performance)

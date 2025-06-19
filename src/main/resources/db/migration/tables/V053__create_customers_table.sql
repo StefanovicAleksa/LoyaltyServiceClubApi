@@ -1,4 +1,4 @@
--- V013__create_customers_table.sql
+-- V053__create_customers_table.sql
 -- Main customer information table
 
 CREATE TABLE customers

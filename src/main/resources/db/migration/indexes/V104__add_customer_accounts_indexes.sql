@@ -1,4 +1,4 @@
--- V054__add_customer_accounts_indexes.sql
+-- V104__add_customer_accounts_indexes.sql
 -- Indexes for customer_accounts table
 
 -- Foreign key index (critical for JOINs)

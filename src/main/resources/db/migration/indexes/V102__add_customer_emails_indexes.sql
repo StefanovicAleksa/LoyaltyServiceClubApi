@@ -1,4 +1,4 @@
--- V052__add_customer_emails_indexes.sql
+-- V102__add_customer_emails_indexes.sql
 -- Indexes for customer_emails table
 
 -- Verification status index for admin/marketing queries

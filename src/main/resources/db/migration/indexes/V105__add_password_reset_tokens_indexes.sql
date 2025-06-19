@@ -1,4 +1,4 @@
--- V055__add_password_reset_tokens_indexes.sql
+-- V105__add_password_reset_tokens_indexes.sql
 -- Indexes for password_reset_tokens table
 
 -- Foreign key index

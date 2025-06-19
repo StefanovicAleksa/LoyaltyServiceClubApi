@@ -1,4 +1,4 @@
--- V015__create_password_reset_tokens_table.sql
+-- V055__create_password_reset_tokens_table.sql
 -- Password reset tokens for forgot password functionality
 
 CREATE TABLE password_reset_tokens

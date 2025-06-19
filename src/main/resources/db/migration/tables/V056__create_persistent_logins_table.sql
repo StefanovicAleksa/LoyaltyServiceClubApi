@@ -1,4 +1,4 @@
--- V016__create_persistent_logins_table.sql
+-- V056__create_persistent_logins_table.sql
 -- Spring Security's persistent login (remember-me) table
 
 CREATE TABLE persistent_logins

@@ -1,4 +1,4 @@
--- V014__create_customer_accounts_table.sql
+-- V054__create_customer_accounts_table.sql
 -- Customer login accounts with authentication credentials
 
 CREATE TABLE customer_accounts

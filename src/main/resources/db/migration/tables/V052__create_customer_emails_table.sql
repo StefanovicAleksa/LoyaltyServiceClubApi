@@ -1,4 +1,4 @@
--- V012__create_customer_emails_table.sql
+-- V052__create_customer_emails_table.sql
 -- Customer email addresses with verification status
 
 CREATE TABLE customer_emails
