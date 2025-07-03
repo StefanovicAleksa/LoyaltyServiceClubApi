@@ -13,7 +13,7 @@ public class CustomerPhone {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "phone", nullable = false, unique = true, length = 12)
+    @Column(name = "phone", nullable = false, unique = true, length = 13)
     private String phone;
 
     @Column(name = "is_verified", nullable = false)

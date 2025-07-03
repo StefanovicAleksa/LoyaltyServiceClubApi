@@ -4,7 +4,7 @@
 CREATE TABLE customer_phones
 (
     id                 BIGSERIAL PRIMARY KEY,
-    phone              VARCHAR(12) NOT NULL UNIQUE,
+    phone              VARCHAR(13) NOT NULL UNIQUE,
     is_verified        BOOLEAN     NOT NULL DEFAULT false,
 
     -- spring audit columns
