@@ -32,7 +32,7 @@ public class PasswordResetToken {
     @Column(name = "last_modified_date", nullable = false)
     private OffsetDateTime lastModifiedDate;
 
-    PasswordResetToken() {}
+    public PasswordResetToken() {}
 
     public Long getId() {
         return id;
