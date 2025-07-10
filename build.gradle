@@ -19,17 +19,50 @@ repositories {
 }
 
 dependencies {
+	// Core Spring Boot starters
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 	implementation 'org.springframework.boot:spring-boot-starter-web'
+
+	// ADD SPRING SECURITY - This fixes your compilation errors
+	implementation 'org.springframework.boot:spring-boot-starter-security'
+
+	// Remove this since we're using Spring Security's BCrypt
+	// implementation 'org.mindrot:jbcrypt:0.4'
+
+	// Database migration
 	implementation 'org.flywaydb:flyway-core'
+
+	// Development tools
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
+
+	// Database drivers
 	runtimeOnly 'org.postgresql:postgresql'
+
+	// Testing Dependencies
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+	testImplementation 'org.springframework.security:spring-security-test'
+	testImplementation 'com.h2database:h2' // In-memory database for tests
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// Ensure dependency versions are managed properly
+dependencyManagement {
+	imports {
+		mavenBom "org.springframework.boot:spring-boot-dependencies:3.5.0"
+	}
 }
 
 tasks.named('test') {
 	useJUnitPlatform()
+
+	// Test configuration
+	testLogging {
+		events "passed", "skipped", "failed"
+		exceptionFormat "full"
+	}
+
+	// Use separate test database configuration
+	systemProperty 'spring.profiles.active', 'test'
 }
 
 flyway {
