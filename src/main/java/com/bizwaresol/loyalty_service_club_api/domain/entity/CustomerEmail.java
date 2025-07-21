@@ -17,7 +17,7 @@ public class CustomerEmail {
     private String email;
 
     @Column(name = "is_verified", nullable = false)
-    private boolean isVerified;
+    private boolean verified;  // ← Changed from 'isVerified' to 'verified'
 
     @Column(name = "created_date", nullable = false, updatable = false)
     private OffsetDateTime createdDate;
@@ -44,12 +44,12 @@ public class CustomerEmail {
         this.email = email;
     }
 
-    public boolean isVerified() {
-        return isVerified;
+    public boolean isVerified() {  // ← Keep 'isVerified()' for getter (boolean convention)
+        return verified;
     }
 
-    public void setVerified(boolean verified) {
-        isVerified = verified;
+    public void setVerified(boolean verified) {  // ← Now matches the property name
+        this.verified = verified;
     }
 
     public OffsetDateTime getCreatedDate() {
@@ -85,7 +85,7 @@ public class CustomerEmail {
         return "CustomerEmail{" +
                 ", id=" + id +
                 ", email='" + email + '\'' +
-                "isVerified=" + isVerified +
+                "verified=" + verified +  // ← Updated field reference
                 '}';
     }
 }

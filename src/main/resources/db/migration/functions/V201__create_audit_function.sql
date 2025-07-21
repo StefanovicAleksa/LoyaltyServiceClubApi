@@ -1,18 +1,45 @@
--- V201__create_audit_function.sql
--- Reusable audit function for created_date and last_modified_date
-
 CREATE OR REPLACE FUNCTION update_audit_fields()
     RETURNS TRIGGER AS
 $$
+DECLARE
+    has_created_date BOOLEAN;
+    has_last_modified_date BOOLEAN;
 BEGIN
+    -- Check if columns exist (done once per trigger execution)
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = TG_TABLE_SCHEMA
+          AND table_name = TG_TABLE_NAME
+          AND column_name = 'created_date'
+    ) INTO has_created_date;
+
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = TG_TABLE_SCHEMA
+          AND table_name = TG_TABLE_NAME
+          AND column_name = 'last_modified_date'
+    ) INTO has_last_modified_date;
+
     IF TG_OP = 'INSERT' THEN
-        NEW.created_date = CURRENT_TIMESTAMP;
-        NEW.last_modified_date = CURRENT_TIMESTAMP;
+        -- Set created_date if column exists
+        IF has_created_date THEN
+            NEW.created_date = CURRENT_TIMESTAMP;
+        END IF;
+
+        -- Set last_modified_date if column exists
+        IF has_last_modified_date THEN
+            NEW.last_modified_date = CURRENT_TIMESTAMP;
+        END IF;
+
         RETURN NEW;
     END IF;
 
     IF TG_OP = 'UPDATE' THEN
-        NEW.last_modified_date = CURRENT_TIMESTAMP;
+        -- Only update last_modified_date if column exists
+        IF has_last_modified_date THEN
+            NEW.last_modified_date = CURRENT_TIMESTAMP;
+        END IF;
+
         RETURN NEW;
     END IF;
 

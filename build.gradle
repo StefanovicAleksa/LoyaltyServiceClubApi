@@ -5,6 +5,9 @@ plugins {
 	id 'org.flywaydb.flyway' version '9.22.3'
 }
 
+// Import the FlywayMigrateTask class
+import org.flywaydb.gradle.task.FlywayMigrateTask
+
 group = 'com.bizwaresol'
 version = '0.0.1-SNAPSHOT'
 
@@ -18,16 +21,30 @@ repositories {
 	mavenCentral()
 }
 
+// Define database configurations
+def mainDbConfig = [
+		url: 'jdbc:postgresql://localhost:5432/loyalty_service_club',
+		user: 'loyalty_service_club_admin',
+		password: 'Loyalty16',
+		name: 'loyalty_service_club',
+		owner: 'loyalty_service_club_admin'
+]
+
+def testDbConfig = [
+		url: 'jdbc:postgresql://localhost:5432/loyalty_service_club_test',
+		user: 'loyalty_service_club_admin',
+		password: 'Loyalty16',
+		name: 'loyalty_service_club_test',
+		owner: 'loyalty_service_club_admin'
+]
+
 dependencies {
 	// Core Spring Boot starters
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 	implementation 'org.springframework.boot:spring-boot-starter-web'
 
-	// ADD SPRING SECURITY - This fixes your compilation errors
+	// Spring Security
 	implementation 'org.springframework.boot:spring-boot-starter-security'
-
-	// Remove this since we're using Spring Security's BCrypt
-	// implementation 'org.mindrot:jbcrypt:0.4'
 
 	// Database migration
 	implementation 'org.flywaydb:flyway-core'
@@ -43,6 +60,26 @@ dependencies {
 	testImplementation 'org.springframework.security:spring-security-test'
 	testImplementation 'com.h2database:h2' // In-memory database for tests
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// Manually create the integrationTest source set (Gradle's standard approach)
+sourceSets {
+	integrationTest {
+		java {
+			srcDir 'src/it/java'
+			compileClasspath += sourceSets.main.output + sourceSets.test.output
+			runtimeClasspath += sourceSets.main.output + sourceSets.test.output
+		}
+		resources {
+			srcDir 'src/it/resources'
+		}
+	}
+}
+
+// Create configurations for integration tests
+configurations {
+	integrationTestImplementation.extendsFrom testImplementation
+	integrationTestRuntimeOnly.extendsFrom testRuntimeOnly
 }
 
 // Ensure dependency versions are managed properly
@@ -65,61 +102,138 @@ tasks.named('test') {
 	systemProperty 'spring.profiles.active', 'test'
 }
 
-flyway {
-	url = 'jdbc:postgresql://localhost:5432/loyalty_service_club'
-	user = 'loyalty_service_club_admin'
-	password = 'Loyalty16'
+// Create the integrationTest task manually
+tasks.register('integrationTest', Test) {
+	description = 'Runs integration tests.'
+	group = 'verification'
 
-	// Match your actual directory structure
+	testClassesDirs = sourceSets.integrationTest.output.classesDirs
+	classpath = sourceSets.integrationTest.runtimeClasspath
+
+	useJUnitPlatform()
+
+	shouldRunAfter tasks.test
+
+	// Use the correct profile for integration tests
+	systemProperty 'spring.profiles.active', 'integration-test-postgres'
+
+	// Test configuration
+	testLogging {
+		events "passed", "skipped", "failed"
+		exceptionFormat "full"
+	}
+
+	// Ensure proper JVM args for integration tests
+	maxHeapSize = "1024m"
+
+	// Fail fast on first test failure for quicker feedback
+	failFast = false
+}
+
+// Base Flyway configuration (common parts)
+flyway {
+	// These will be explicitly set by specific tasks
 	locations = [
 			'classpath:db/migration/enums',
 			'classpath:db/migration/tables',
 			'classpath:db/migration/indexes',
 			'classpath:db/migration/functions',
 			'classpath:db/migration/triggers',
-			'classpath:db/migration/views'
+			'classpath:db/migration/views',
+			'classpath:db/migration/jobs',
+			'classpath:db/migration/seeders'
 	]
-
 	schemas = ['public']
 	cleanDisabled = false
 	validateOnMigrate = true
 }
 
-// Task to reset database with proper permissions
+// --- Specific Reset Database Tasks ---
+
+// Task to reset the MAIN database
 tasks.register('resetDatabase', Exec) {
 	group = 'flyway'
-	description = 'Drops and recreates the database schema with proper privileges'
+	description = 'Drops and recreates the schema for the main database.'
 
-	// Use postgres superuser to drop/create schema, then grant permissions
 	commandLine('psql',
 			'-h', 'localhost',
-			'-U', 'postgres',  // Use postgres superuser
-			'-d', 'loyalty_service_club',
-			'-c', '''
-              DROP SCHEMA IF EXISTS public CASCADE; 
-              CREATE SCHEMA public; 
-              
-              -- Grant schema privileges
-              GRANT ALL ON SCHEMA public TO loyalty_service_club_admin; 
+			'-U', 'postgres',
+			'-d', mainDbConfig.name,
+			'-c', """
+              DROP SCHEMA IF EXISTS public CASCADE;
+              CREATE SCHEMA public;
+              GRANT ALL ON SCHEMA public TO ${mainDbConfig.owner};
               GRANT ALL ON SCHEMA public TO public;
-              ALTER SCHEMA public OWNER TO loyalty_service_club_admin;
-              
-              -- Grant default privileges for future objects
-              ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO loyalty_service_club_admin;
-              ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO loyalty_service_club_admin;
-              ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO loyalty_service_club_admin;
-              
-              -- Ensure loyalty_service_club_admin can create objects
-              GRANT CREATE ON DATABASE loyalty_service_club TO loyalty_service_club_admin;
-          ''')
+              ALTER SCHEMA public OWNER TO ${mainDbConfig.owner};
+              ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO ${mainDbConfig.owner};
+              ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO ${mainDbConfig.owner};
+              ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO ${mainDbConfig.owner};
+              GRANT CREATE ON DATABASE ${mainDbConfig.name} TO ${mainDbConfig.owner};
 
-	doFirst {
-		println("🗑️  Dropping and recreating database schema...")
-	}
+              -- Grant pg_cron privileges for scheduled jobs
+              GRANT USAGE ON SCHEMA cron TO ${mainDbConfig.owner};
+              GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA cron TO ${mainDbConfig.owner};
+              ALTER DEFAULT PRIVILEGES IN SCHEMA cron GRANT EXECUTE ON FUNCTIONS TO ${mainDbConfig.owner};
+              
+              -- Grant session parameter modification privileges
+              ALTER USER ${mainDbConfig.owner} SET session_replication_role = replica;
+          """)
 
-	doLast {
-		println("✅ Database schema reset complete with full privileges restored")
-	}
+	doFirst { println("🗑️  Dropping and recreating database schema for ${mainDbConfig.name}...") }
+	doLast { println("✅ Database schema reset complete for ${mainDbConfig.name} with pg_cron privileges granted") }
+}
+
+// Task to reset the TEST database
+tasks.register('resetTestDatabase', Exec) {
+	group = 'flyway'
+	description = 'Drops and recreates the schema for the test database.'
+
+	commandLine('psql',
+			'-h', 'localhost',
+			'-U', 'postgres',
+			'-d', testDbConfig.name,
+			'-c', """
+              DROP SCHEMA IF EXISTS public CASCADE;
+              CREATE SCHEMA public;
+              GRANT ALL ON SCHEMA public TO ${testDbConfig.owner};
+              GRANT ALL ON SCHEMA public TO public;
+              ALTER SCHEMA public OWNER TO ${testDbConfig.owner};
+              ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO ${testDbConfig.owner};
+              ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO ${testDbConfig.owner};
+              ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO ${testDbConfig.owner};
+              GRANT CREATE ON DATABASE ${testDbConfig.name} TO ${testDbConfig.owner};
+
+              -- Grant pg_cron privileges for scheduled jobs
+              GRANT USAGE ON SCHEMA cron TO ${testDbConfig.owner};
+              GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA cron TO ${testDbConfig.owner};
+              ALTER DEFAULT PRIVILEGES IN SCHEMA cron GRANT EXECUTE ON FUNCTIONS TO ${testDbConfig.owner};
+              
+              -- Grant session parameter modification privileges
+              ALTER USER ${testDbConfig.owner} SUPERUSER;
+          """)
+
+	doFirst { println("🗑️  Dropping and recreating database schema for ${testDbConfig.name}...") }
+	doLast { println("✅ Database schema reset complete for ${testDbConfig.name} with superuser privileges granted") }
+}
+
+// --- Specific Migrate Database Tasks ---
+
+// Task to migrate the MAIN database
+tasks.register('migrateDatabase', FlywayMigrateTask) {
+	group = 'flyway'
+	description = 'Migrates the main database.'
+	url = mainDbConfig.url
+	user = mainDbConfig.user
+	password = mainDbConfig.password
+}
+
+// Task to migrate the TEST database
+tasks.register('migrateTestDatabase', FlywayMigrateTask) {
+	group = 'flyway'
+	description = 'Migrates the test database.'
+	url = testDbConfig.url
+	user = testDbConfig.user
+	password = testDbConfig.password
 }
 
 // Task to clean build and force rebuild of resources
@@ -133,20 +247,42 @@ tasks.register('cleanBuildResources') {
 	}
 }
 
-// Main fresh migration task
+// Main fresh migration task for MAIN DB
 tasks.register('flywayFresh') {
 	group = 'flyway'
-	description = 'Complete fresh migration: clean build + reset DB + migrate (like Laravel migrate:fresh)'
-
-	// Dependencies in correct order
+	description = 'Complete fresh migration for main DB: clean build + reset DB + migrate'
 	dependsOn('cleanBuildResources')
-	dependsOn('assemble')  // Build without tests
+	dependsOn('assemble')
 	dependsOn('resetDatabase')
-	finalizedBy('flywayMigrate')
+	finalizedBy('migrateDatabase')
+	doLast { println("🚀 Fresh migration complete for ${mainDbConfig.name}! All current migrations applied.") }
+}
 
-	doLast {
-		println("🚀 Fresh migration complete! All current migrations applied.")
-	}
+// Main fresh migration task for TEST DB
+tasks.register('flywayFreshTest') {
+	group = 'flyway'
+	description = 'Complete fresh migration for test DB: clean build + reset DB + migrate'
+	dependsOn('cleanBuildResources')
+	dependsOn('assemble')
+	dependsOn('resetTestDatabase')
+	finalizedBy('migrateTestDatabase')
+	doLast { println("🚀 Fresh migration complete for ${testDbConfig.name}! All current migrations applied.") }
+}
+
+// New task: setupDatabase (for main DB)
+tasks.register('setupDatabase') {
+	group = 'flyway'
+	description = 'Sets up the main database (loyalty_service_club) from scratch.'
+	dependsOn('flywayFresh')
+	doLast { println("Main database setup complete.") }
+}
+
+// New task: setupTestDatabase (for test DB)
+tasks.register('setupTestDatabase') {
+	group = 'flyway'
+	description = 'Sets up the test database (loyalty_service_club_test) from scratch.'
+	dependsOn('flywayFreshTest')
+	doLast { println("Test database setup complete.") }
 }
 
 // Configure task execution order - MUST be at the end of the file
@@ -154,10 +290,7 @@ afterEvaluate {
 	tasks.named('assemble').configure {
 		mustRunAfter('cleanBuildResources')
 	}
-	tasks.named('resetDatabase').configure {
-		mustRunAfter('assemble')
-	}
-	tasks.named('flywayMigrate').configure {
-		mustRunAfter('resetDatabase')
+	tasks.named('integrationTest').configure {
+		mustRunAfter('setupTestDatabase')
 	}
 }
