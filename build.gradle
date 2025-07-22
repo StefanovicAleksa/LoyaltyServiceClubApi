@@ -1,8 +1,18 @@
+// CRITICAL: Flyway 11.x requires database plugins in buildscript classpath
+buildscript {
+	repositories {
+		mavenCentral()
+	}
+	dependencies {
+		classpath 'org.flywaydb:flyway-database-postgresql:11.7.2'
+	}
+}
+
 plugins {
 	id 'java'
 	id 'org.springframework.boot' version '3.5.0'
 	id 'io.spring.dependency-management' version '1.1.7'
-	id 'org.flywaydb.flyway' version '9.22.3'
+	id 'org.flywaydb.flyway' version '11.7.2'  // Updated to match Spring Boot's dependency version
 }
 
 // Import the FlywayMigrateTask class
@@ -38,6 +48,12 @@ def testDbConfig = [
 		owner: 'loyalty_service_club_admin'
 ]
 
+// Create configurations for integration tests
+configurations {
+	integrationTestImplementation.extendsFrom testImplementation
+	integrationTestRuntimeOnly.extendsFrom testRuntimeOnly
+}
+
 dependencies {
 	// Core Spring Boot starters
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
@@ -46,8 +62,9 @@ dependencies {
 	// Spring Security
 	implementation 'org.springframework.boot:spring-boot-starter-security'
 
-	// Database migration
+	// Database migration - Let Spring Boot manage Flyway versions (11.x)
 	implementation 'org.flywaydb:flyway-core'
+	implementation 'org.flywaydb:flyway-database-postgresql'
 
 	// Development tools
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
@@ -74,12 +91,6 @@ sourceSets {
 			srcDir 'src/it/resources'
 		}
 	}
-}
-
-// Create configurations for integration tests
-configurations {
-	integrationTestImplementation.extendsFrom testImplementation
-	integrationTestRuntimeOnly.extendsFrom testRuntimeOnly
 }
 
 // Ensure dependency versions are managed properly
@@ -130,9 +141,12 @@ tasks.register('integrationTest', Test) {
 	failFast = false
 }
 
-// Base Flyway configuration (common parts)
+// Base Flyway configuration (common parts) - Updated for Flyway 11.x
 flyway {
-	// These will be explicitly set by specific tasks
+	// Basic connection settings - let Flyway 11.x auto-discover the driver
+	driver = 'org.postgresql.Driver'
+
+	// Migration locations
 	locations = [
 			'classpath:db/migration/enums',
 			'classpath:db/migration/tables',
@@ -218,22 +232,24 @@ tasks.register('resetTestDatabase', Exec) {
 
 // --- Specific Migrate Database Tasks ---
 
-// Task to migrate the MAIN database
+// Task to migrate the MAIN database - Updated for Flyway 11.x
 tasks.register('migrateDatabase', FlywayMigrateTask) {
 	group = 'flyway'
 	description = 'Migrates the main database.'
 	url = mainDbConfig.url
 	user = mainDbConfig.user
 	password = mainDbConfig.password
+	driver = 'org.postgresql.Driver'
 }
 
-// Task to migrate the TEST database
+// Task to migrate the TEST database - Updated for Flyway 11.x
 tasks.register('migrateTestDatabase', FlywayMigrateTask) {
 	group = 'flyway'
 	description = 'Migrates the test database.'
 	url = testDbConfig.url
 	user = testDbConfig.user
 	password = testDbConfig.password
+	driver = 'org.postgresql.Driver'
 }
 
 // Task to clean build and force rebuild of resources
