@@ -1,5 +1,5 @@
--- V205__create_mark_inactive_accounts_function.sql
--- Function to mark inactive accounts in batches with full logging
+-- V208__update_mark_inactive_accounts_function_fixed.sql
+-- Updated inactivity function with proper variable scoping
 
 CREATE OR REPLACE FUNCTION mark_inactive_accounts_batched()
     RETURNS VOID AS $$
@@ -7,7 +7,6 @@ DECLARE
     -- Configuration variables
     inactivity_days INTEGER;
     batch_size INTEGER;
-    cutoff_date TIMESTAMPTZ;
 
     -- Processing variables
     total_processed INTEGER := 0;
@@ -23,22 +22,15 @@ DECLARE
     error_occurred BOOLEAN := FALSE;
     error_message TEXT;
 
-    -- Cursor for batch processing
-    account_cursor CURSOR FOR
-        SELECT id, activity_status
-        FROM customer_accounts
-        WHERE activity_status = 'ACTIVE'::customer_account_activity_status_enum
-          AND last_login_at < cutoff_date
-        ORDER BY id
-            FOR UPDATE SKIP LOCKED; -- Prevents blocking if multiple processes run
-
+    -- Query string for dynamic cursor
+    cursor_query TEXT;
     account_record RECORD;
 BEGIN
     -- Record start time
     start_time := CURRENT_TIMESTAMP;
 
     BEGIN
-        -- Read configuration values
+        -- Read configuration values FIRST
         SELECT value::INTEGER INTO inactivity_days
         FROM business_config
         WHERE key = 'account_inactivity_days';
@@ -64,46 +56,50 @@ BEGIN
             RAISE EXCEPTION 'Invalid configuration: inactivity_batch_size must be > 0, got %', batch_size;
         END IF;
 
-        -- Calculate cutoff date
-        cutoff_date := CURRENT_TIMESTAMP - (inactivity_days || ' days')::INTERVAL;
+        RAISE NOTICE 'Starting account inactivity job: inactivity_days=%, batch_size=%',
+            inactivity_days, batch_size;
 
-        RAISE NOTICE 'Starting account inactivity job: inactivity_days=%, batch_size=%, cutoff_date=%',
-            inactivity_days, batch_size, cutoff_date;
+        -- Build dynamic query with loaded config values
+        cursor_query := format('
+            SELECT account_id, activity_status
+            FROM account_activity_data
+            WHERE activity_status = ''ACTIVE''
+              AND has_logged_in = true
+              AND days_since_login > %s
+            ORDER BY account_id
+            FOR UPDATE SKIP LOCKED',
+                               inactivity_days
+                        );
 
-        -- Process accounts in batches
-        OPEN account_cursor;
+        -- Process accounts in batches using dynamic cursor
+        current_batch_size := 0;
 
-        LOOP
-            current_batch_size := 0;
-
-            -- Process one batch
+        FOR account_record IN EXECUTE cursor_query
             LOOP
-                FETCH account_cursor INTO account_record;
-                EXIT WHEN NOT FOUND OR current_batch_size >= batch_size;
-
                 -- Mark account as inactive
                 UPDATE customer_accounts
                 SET activity_status = 'INACTIVE'::customer_account_activity_status_enum,
                     last_modified_date = CURRENT_TIMESTAMP
-                WHERE id = account_record.id;
+                WHERE id = account_record.account_id;
 
                 current_batch_size := current_batch_size + 1;
                 total_processed := total_processed + 1;
+
+                -- Process in batches
+                IF current_batch_size >= batch_size THEN
+                    batch_count := batch_count + 1;
+                    RAISE NOTICE 'Completed batch %: % accounts processed (total: %)',
+                        batch_count, current_batch_size, total_processed;
+                    current_batch_size := 0;
+                END IF;
             END LOOP;
 
-            -- Exit if no more accounts to process
-            EXIT WHEN current_batch_size = 0;
-
+        -- Handle final partial batch
+        IF current_batch_size > 0 THEN
             batch_count := batch_count + 1;
-
-            RAISE NOTICE 'Completed batch %: % accounts processed (total: %)',
+            RAISE NOTICE 'Completed final batch %: % accounts processed (total: %)',
                 batch_count, current_batch_size, total_processed;
-
-            -- Optional: Add small delay between batches to reduce system load
-            -- PERFORM pg_sleep(0.1);
-        END LOOP;
-
-        CLOSE account_cursor;
+        END IF;
 
         -- Calculate execution time
         end_time := CURRENT_TIMESTAMP;
@@ -131,14 +127,6 @@ BEGIN
         -- Handle errors
         error_occurred := TRUE;
         error_message := SQLERRM;
-
-        -- Ensure cursor is closed (PostgreSQL doesn't have %ISOPEN)
-        BEGIN
-            CLOSE account_cursor;
-        EXCEPTION WHEN OTHERS THEN
-            -- Cursor might already be closed, ignore error
-            NULL;
-        END;
 
         -- Calculate execution time even for failed runs
         end_time := CURRENT_TIMESTAMP;

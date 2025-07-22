@@ -1,6 +1,8 @@
+-- V201__create_audit_fields_function.sql
+-- Updated audit fields function with better error handling
+
 CREATE OR REPLACE FUNCTION update_audit_fields()
-    RETURNS TRIGGER AS
-$$
+    RETURNS TRIGGER AS $$
 DECLARE
     has_created_date BOOLEAN;
     has_last_modified_date BOOLEAN;

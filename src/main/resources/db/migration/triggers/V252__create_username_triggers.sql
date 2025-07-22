@@ -1,5 +1,5 @@
--- V253__add_auto_username_trigger.sql
--- Trigger to automatically set username on customer account insert
+-- V252__create_username_trigger.sql
+-- Username setting trigger for customer account creation
 
 CREATE TRIGGER set_username_on_account_creation
     BEFORE INSERT ON customer_accounts
