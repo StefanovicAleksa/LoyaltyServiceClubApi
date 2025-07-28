@@ -7,19 +7,19 @@ $$
 DECLARE
     username_value TEXT;
 BEGIN
-    -- Use view to get preferred username
+    -- Get preferred username from customer contact lookup view
     SELECT preferred_username
     INTO username_value
     FROM customer_contact_lookup
     WHERE customer_id = NEW.customer_id;
 
--- Validate username is available
-    IF username_value IS NULL THEN
-        RAISE EXCEPTION 'Cannot create account: customer has no email or phone contact information';
+    -- Validate that customer has contact information
+    IF username_value IS NULL OR trim(username_value) = '' THEN
+        RAISE EXCEPTION 'Cannot create account: customer has no email or phone contact information (customer_id: %)', NEW.customer_id;
     END IF;
 
--- Set username
-    NEW.username = username_value;
+    -- Set the username
+    NEW.username = trim(username_value);
 
     RETURN NEW;
 END;

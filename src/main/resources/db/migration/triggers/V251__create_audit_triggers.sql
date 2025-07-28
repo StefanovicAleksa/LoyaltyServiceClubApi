@@ -2,56 +2,56 @@
 -- Audit field triggers for all tables with created_date and last_modified_date
 
 -- Customer emails audit trigger
-CREATE TRIGGER audit_customer_emails
+CREATE TRIGGER z_audit_customer_emails
     BEFORE INSERT OR UPDATE
     ON customer_emails
     FOR EACH ROW
 EXECUTE FUNCTION update_audit_fields();
 
 -- Customer phones audit trigger
-CREATE TRIGGER audit_customer_phones
+CREATE TRIGGER z_audit_customer_phones
     BEFORE INSERT OR UPDATE
     ON customer_phones
     FOR EACH ROW
 EXECUTE FUNCTION update_audit_fields();
 
 -- Customers audit trigger
-CREATE TRIGGER audit_customers
+CREATE TRIGGER z_audit_customers
     BEFORE INSERT OR UPDATE
     ON customers
     FOR EACH ROW
 EXECUTE FUNCTION update_audit_fields();
 
 -- Customer accounts audit trigger
-CREATE TRIGGER audit_customer_accounts
+CREATE TRIGGER z_audit_customer_accounts
     BEFORE INSERT OR UPDATE
     ON customer_accounts
     FOR EACH ROW
 EXECUTE FUNCTION update_audit_fields();
 
 -- Password reset tokens audit trigger
-CREATE TRIGGER audit_password_reset_tokens
+CREATE TRIGGER z_audit_password_reset_tokens
     BEFORE INSERT OR UPDATE
     ON password_reset_tokens
     FOR EACH ROW
 EXECUTE FUNCTION update_audit_fields();
 
 -- Business config audit trigger
-CREATE TRIGGER audit_business_config
+CREATE TRIGGER z_audit_business_config
     BEFORE INSERT OR UPDATE
     ON business_config
     FOR EACH ROW
 EXECUTE FUNCTION update_audit_fields();
 
 -- Job execution audit trigger (INSERT only since records are immutable)
-CREATE TRIGGER audit_job_execution_audit
+CREATE TRIGGER z_audit_job_execution_audit
     BEFORE INSERT
     ON job_execution_audit
     FOR EACH ROW
 EXECUTE FUNCTION update_audit_fields();
 
 -- Account status audit trigger
-CREATE TRIGGER audit_account_status_audit
+CREATE TRIGGER z_audit_account_status_audit
     BEFORE INSERT
     ON account_status_audit
     FOR EACH ROW

@@ -189,12 +189,12 @@ tasks.register('resetDatabase', Exec) {
               GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA cron TO ${mainDbConfig.owner};
               ALTER DEFAULT PRIVILEGES IN SCHEMA cron GRANT EXECUTE ON FUNCTIONS TO ${mainDbConfig.owner};
               
-              -- Grant session parameter modification privileges
-              ALTER USER ${mainDbConfig.owner} SET session_replication_role = replica;
+              -- FIXED: Ensure triggers are enabled (DO NOT set to replica!)
+              ALTER USER ${mainDbConfig.owner} RESET session_replication_role;
           """)
 
 	doFirst { println("🗑️  Dropping and recreating database schema for ${mainDbConfig.name}...") }
-	doLast { println("✅ Database schema reset complete for ${mainDbConfig.name} with pg_cron privileges granted") }
+	doLast { println("✅ Database schema reset complete for ${mainDbConfig.name} with pg_cron privileges granted and triggers ENABLED") }
 }
 
 // Task to reset the TEST database
@@ -222,12 +222,15 @@ tasks.register('resetTestDatabase', Exec) {
               GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA cron TO ${testDbConfig.owner};
               ALTER DEFAULT PRIVILEGES IN SCHEMA cron GRANT EXECUTE ON FUNCTIONS TO ${testDbConfig.owner};
               
-              -- Grant session parameter modification privileges
+              -- FIXED: Ensure triggers are enabled for tests (CRITICAL!)
+              ALTER USER ${testDbConfig.owner} RESET session_replication_role;
+              
+              -- Grant superuser for tests (but keep triggers enabled!)
               ALTER USER ${testDbConfig.owner} SUPERUSER;
           """)
 
 	doFirst { println("🗑️  Dropping and recreating database schema for ${testDbConfig.name}...") }
-	doLast { println("✅ Database schema reset complete for ${testDbConfig.name} with superuser privileges granted") }
+	doLast { println("✅ Database schema reset complete for ${testDbConfig.name} with superuser privileges and triggers ENABLED") }
 }
 
 // --- Specific Migrate Database Tasks ---
@@ -299,6 +302,30 @@ tasks.register('setupTestDatabase') {
 	description = 'Sets up the test database (loyalty_service_club_test) from scratch.'
 	dependsOn('flywayFreshTest')
 	doLast { println("Test database setup complete.") }
+}
+
+// ADDITIONAL TASK: Fix existing databases with replica role issue
+tasks.register('fixReplicaRole', Exec) {
+	group = 'flyway'
+	description = 'Fixes existing databases that have incorrect session_replication_role settings'
+
+	commandLine('psql',
+			'-h', 'localhost',
+			'-U', 'postgres',
+			'-c', """
+              -- Fix main database user
+              ALTER USER ${mainDbConfig.owner} RESET session_replication_role;
+              
+              -- Connect to test database and fix user there too
+              \\c ${testDbConfig.name}
+              ALTER USER ${testDbConfig.owner} RESET session_replication_role;
+              
+              -- Verify the fix
+              SELECT usename, useconfig FROM pg_user WHERE usename = '${mainDbConfig.owner}';
+          """)
+
+	doFirst { println("🔧 Fixing session_replication_role for database users...") }
+	doLast { println("✅ session_replication_role fixed - triggers should now work!") }
 }
 
 // Configure task execution order - MUST be at the end of the file
