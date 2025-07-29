@@ -3,6 +3,8 @@ package com.bizwaresol.loyalty_service_club_api.service.data;
 import com.bizwaresol.loyalty_service_club_api.data.repository.CustomerAccountRepository;
 import com.bizwaresol.loyalty_service_club_api.domain.entity.Customer;
 import com.bizwaresol.loyalty_service_club_api.domain.entity.CustomerAccount;
+import com.bizwaresol.loyalty_service_club_api.domain.entity.lookup.CustomerContactLookup;
+import com.bizwaresol.loyalty_service_club_api.data.repository.lookup.CustomerContactLookupRepository;
 import com.bizwaresol.loyalty_service_club_api.domain.enums.CustomerAccountActivityStatus;
 import com.bizwaresol.loyalty_service_club_api.domain.enums.CustomerAccountVerificationStatus;
 import com.bizwaresol.loyalty_service_club_api.exception.base.ServiceException;
@@ -16,6 +18,7 @@ import com.bizwaresol.loyalty_service_club_api.exception.validation.field.EmptyF
 import com.bizwaresol.loyalty_service_club_api.exception.validation.field.FieldTooShortException;
 import com.bizwaresol.loyalty_service_club_api.exception.validation.field.FieldTooLongException;
 import com.bizwaresol.loyalty_service_club_api.exception.validation.security.PasswordValidationException;
+import com.bizwaresol.loyalty_service_club_api.exception.validation.format.InvalidPhoneFormatException;
 
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -30,10 +33,12 @@ public class CustomerAccountService {
 
     private final CustomerAccountRepository customerAccountRepository;
     private final PasswordEncoder passwordEncoder;
+    private final CustomerContactLookupRepository customerContactLookupRepository;
 
-    public CustomerAccountService(CustomerAccountRepository customerAccountRepository, PasswordEncoder passwordEncoder) {
+    public CustomerAccountService(CustomerAccountRepository customerAccountRepository, CustomerContactLookupRepository customerContactLookupRepository, PasswordEncoder passwordEncoder) {
         this.customerAccountRepository = customerAccountRepository;
         this.passwordEncoder = passwordEncoder;
+        this.customerContactLookupRepository = customerContactLookupRepository;
     }
 
     // ===== CREATE OPERATIONS =====
@@ -530,6 +535,34 @@ public class CustomerAccountService {
 
         try {
             customerAccountRepository.delete(customerAccount);
+        } catch (Exception e) {
+            throw RepositoryErrorMapper.mapException(e);
+        }
+    }
+
+    /**
+     * Finds an account by phone number using optimized lookup
+     * @param phone the phone number to search for
+     * @return the CustomerAccount entity
+     * @throws NullFieldException if phone is null
+     * @throws EmptyFieldException if phone is empty
+     * @throws FieldTooShortException if phone is too short
+     * @throws FieldTooLongException if phone is too long
+     * @throws InvalidPhoneFormatException if phone format is invalid
+     * @throws CustomerAccountNotFoundException if account doesn't exist
+     * @throws ServiceException if repository operation fails
+     */
+    @Transactional(readOnly = true)
+    public CustomerAccount findByPhoneNumber(String phone) throws ServiceException {
+        DataValidator.validatePhone(phone, "phone");
+
+        try {
+            CustomerContactLookup contactInfo = customerContactLookupRepository.findByPhone(phone.trim())
+                    .orElseThrow(() -> new CustomerAccountNotFoundException("No customer account found with phone: " + phone));
+
+            return findById(contactInfo.getCustomerId());
+        } catch (CustomerAccountNotFoundException e) {
+            throw e;
         } catch (Exception e) {
             throw RepositoryErrorMapper.mapException(e);
         }

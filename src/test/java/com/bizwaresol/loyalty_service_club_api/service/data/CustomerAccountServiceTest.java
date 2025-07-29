@@ -1,10 +1,12 @@
 package com.bizwaresol.loyalty_service_club_api.service.data;
 
 import com.bizwaresol.loyalty_service_club_api.data.repository.CustomerAccountRepository;
+import com.bizwaresol.loyalty_service_club_api.data.repository.lookup.CustomerContactLookupRepository;
 import com.bizwaresol.loyalty_service_club_api.domain.entity.Customer;
 import com.bizwaresol.loyalty_service_club_api.domain.entity.CustomerAccount;
 import com.bizwaresol.loyalty_service_club_api.domain.entity.CustomerEmail;
 import com.bizwaresol.loyalty_service_club_api.domain.entity.CustomerPhone;
+import com.bizwaresol.loyalty_service_club_api.domain.entity.lookup.CustomerContactLookup;
 import com.bizwaresol.loyalty_service_club_api.domain.enums.CustomerAccountActivityStatus;
 import com.bizwaresol.loyalty_service_club_api.domain.enums.CustomerAccountVerificationStatus;
 import com.bizwaresol.loyalty_service_club_api.exception.business.resource.CustomerAccountNotFoundException;
@@ -39,6 +41,9 @@ class CustomerAccountServiceTest {
 
     @Mock
     private CustomerAccountRepository customerAccountRepository;
+
+    @Mock
+    private CustomerContactLookupRepository customerContactLookupRepository;
 
     @Mock
     private PasswordEncoder passwordEncoder;
@@ -1128,6 +1133,79 @@ class CustomerAccountServiceTest {
 
             assertThat(result).isFalse();
             verify(passwordEncoder).matches("wrongpassword123", "$2a$10$hashedPassword");
+        }
+    }
+
+    @Nested
+    @DisplayName("findByPhoneNumber() Tests")
+    class FindByPhoneNumberTests {
+
+        private CustomerContactLookup sampleContactLookup;
+        private final String VALID_PHONE = "+381123456789";
+
+        @BeforeEach
+        void setUpContactLookup() {
+            sampleContactLookup = new CustomerContactLookup();
+            sampleContactLookup.setCustomerId(VALID_CUSTOMER_ID);
+            sampleContactLookup.setPhone(VALID_PHONE);
+        }
+
+        @Test
+        @DisplayName("Should throw NullFieldException when phone is null")
+        void shouldThrowNullFieldExceptionWhenPhoneIsNull() {
+            assertThatThrownBy(() -> customerAccountService.findByPhoneNumber(null))
+                    .isInstanceOf(NullFieldException.class)
+                    .hasMessage("Field 'phone' cannot be null");
+        }
+
+        @Test
+        @DisplayName("Should throw EmptyFieldException when phone is empty")
+        void shouldThrowEmptyFieldExceptionWhenPhoneIsEmpty() {
+            assertThatThrownBy(() -> customerAccountService.findByPhoneNumber("   "))
+                    .isInstanceOf(EmptyFieldException.class)
+                    .hasMessage("Field 'phone' cannot be empty");
+        }
+
+        @Test
+        @DisplayName("Should throw FieldTooShortException when phone is too short")
+        void shouldThrowFieldTooShortExceptionWhenPhoneIsTooShort() {
+            assertThatThrownBy(() -> customerAccountService.findByPhoneNumber("+38112345"))
+                    .isInstanceOf(FieldTooShortException.class)
+                    .hasMessage("Field phone too short: 9 characters. Min: 12 characters");
+        }
+
+        @Test
+        @DisplayName("Should find account by phone number successfully")
+        void shouldFindAccountByPhoneNumberSuccessfully() {
+            when(customerContactLookupRepository.findByPhone(VALID_PHONE)).thenReturn(Optional.of(sampleContactLookup));
+            when(customerAccountRepository.findById(VALID_CUSTOMER_ID)).thenReturn(Optional.of(sampleAccount));
+
+            CustomerAccount result = customerAccountService.findByPhoneNumber(VALID_PHONE);
+
+            assertThat(result).isEqualTo(sampleAccount);
+            verify(customerContactLookupRepository).findByPhone(VALID_PHONE);
+            verify(customerAccountRepository).findById(VALID_CUSTOMER_ID);
+        }
+
+        @Test
+        @DisplayName("Should throw CustomerAccountNotFoundException when contact lookup fails")
+        void shouldThrowCustomerAccountNotFoundExceptionWhenContactLookupFails() {
+            when(customerContactLookupRepository.findByPhone(VALID_PHONE)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> customerAccountService.findByPhoneNumber(VALID_PHONE))
+                    .isInstanceOf(CustomerAccountNotFoundException.class)
+                    .hasMessage("Customer account not found: No customer account found with phone: " + VALID_PHONE);
+        }
+
+        @Test
+        @DisplayName("Should throw DatabaseSystemException when repository error occurs")
+        void shouldThrowDatabaseSystemExceptionWhenRepositoryErrorOccurs() {
+            when(customerContactLookupRepository.findByPhone(VALID_PHONE))
+                    .thenThrow(new RuntimeException("Database connection failed"));
+
+            assertThatThrownBy(() -> customerAccountService.findByPhoneNumber(VALID_PHONE))
+                    .isInstanceOf(DatabaseSystemException.class)
+                    .hasMessageContaining("Unexpected repository error");
         }
     }
 }
