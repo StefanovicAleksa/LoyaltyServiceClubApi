@@ -31,21 +31,21 @@ repositories {
 	mavenCentral()
 }
 
-// Define database configurations
+// Define database configurations - now using environment variables
 def mainDbConfig = [
 		url: 'jdbc:postgresql://localhost:5432/loyalty_service_club',
-		user: 'loyalty_service_club_admin',
-		password: 'Loyalty16',
+		user: System.getenv('DB_USERNAME') ?: 'loyalty_service_club_admin',
+		password: System.getenv('DB_PASSWORD') ?: 'Loyalty16',
 		name: 'loyalty_service_club',
-		owner: 'loyalty_service_club_admin'
+		owner: System.getenv('DB_USERNAME') ?: 'loyalty_service_club_admin'
 ]
 
 def testDbConfig = [
 		url: 'jdbc:postgresql://localhost:5432/loyalty_service_club_test',
-		user: 'loyalty_service_club_admin',
-		password: 'Loyalty16',
+		user: System.getenv('TEST_DB_USERNAME') ?: 'loyalty_service_club_admin',
+		password: System.getenv('TEST_DB_PASSWORD') ?: 'Loyalty16',
 		name: 'loyalty_service_club_test',
-		owner: 'loyalty_service_club_admin'
+		owner: System.getenv('TEST_DB_USERNAME') ?: 'loyalty_service_club_admin'
 ]
 
 // Create configurations for integration tests
@@ -62,9 +62,23 @@ dependencies {
 	// Spring Security
 	implementation 'org.springframework.boot:spring-boot-starter-security'
 
+	// Environment file support (.env files)
+	implementation 'me.paulschwarz:spring-dotenv:4.0.0'
+
+	// AWS SDK v2 - explicit versions (more reliable than BOM)
+	implementation 'software.amazon.awssdk:sns:2.21.29'
+	implementation 'software.amazon.awssdk:ses:2.21.29'
+	implementation 'software.amazon.awssdk:core:2.21.29'
+
 	// Database migration - Let Spring Boot manage Flyway versions (11.x)
 	implementation 'org.flywaydb:flyway-core'
 	implementation 'org.flywaydb:flyway-database-postgresql'
+
+	// JSON processing (for OTP templates)
+	implementation 'com.fasterxml.jackson.core:jackson-databind'
+
+	// Validation
+	implementation 'org.springframework.boot:spring-boot-starter-validation'
 
 	// Development tools
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
@@ -77,6 +91,10 @@ dependencies {
 	testImplementation 'org.springframework.security:spring-security-test'
 	testImplementation 'com.h2database:h2' // In-memory database for tests
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+	// AWS testing utilities
+	testImplementation 'org.testcontainers:localstack'
+	testImplementation 'org.testcontainers:junit-jupiter'
 }
 
 // Manually create the integrationTest source set (Gradle's standard approach)
