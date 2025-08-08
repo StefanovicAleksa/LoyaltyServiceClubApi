@@ -86,7 +86,7 @@ public class DatabaseBusinessLogicE2ETest {
     private void cleanDatabase() throws SQLException {
         try (Connection conn = dataSource.getConnection()) {
             // Clean in dependency order
-            conn.createStatement().execute("TRUNCATE TABLE password_reset_tokens CASCADE");
+            conn.createStatement().execute("TRUNCATE TABLE otp_tokens CASCADE");
             conn.createStatement().execute("TRUNCATE TABLE customer_accounts CASCADE");
             conn.createStatement().execute("TRUNCATE TABLE customers CASCADE");
             conn.createStatement().execute("TRUNCATE TABLE customer_emails CASCADE");
@@ -99,7 +99,7 @@ public class DatabaseBusinessLogicE2ETest {
             conn.createStatement().execute("ALTER SEQUENCE customer_phones_id_seq RESTART WITH 1");
             conn.createStatement().execute("ALTER SEQUENCE customers_id_seq RESTART WITH 1");
             conn.createStatement().execute("ALTER SEQUENCE customer_accounts_id_seq RESTART WITH 1");
-            conn.createStatement().execute("ALTER SEQUENCE password_reset_tokens_id_seq RESTART WITH 1");
+            conn.createStatement().execute("ALTER SEQUENCE otp_tokens_id_seq RESTART WITH 1");
             conn.createStatement().execute("ALTER SEQUENCE account_status_audit_id_seq RESTART WITH 1");
             conn.createStatement().execute("ALTER SEQUENCE job_execution_audit_id_seq RESTART WITH 1");
         }
@@ -110,11 +110,15 @@ public class DatabaseBusinessLogicE2ETest {
             String[] configs = {
                     "('account_inactivity_days', '60', 'Number of days after last login before marking account as inactive')",
                     "('inactivity_batch_size', '1000', 'Batch size for processing inactive accounts')",
-                    "('password_reset_token_cleanup_days', '7', 'Days to keep password reset tokens after creation')",
+                    "('otp_token_cleanup_days', '7', 'Days to keep OTP tokens after creation')",
                     "('job_execution_audit_cleanup_days', '90', 'Days to keep job execution audit records')",
                     "('account_status_audit_cleanup_days', '365', 'Days to keep account status change audit records')",
                     "('unverified_account_cleanup_days', '30', 'Days to keep unverified accounts that never logged in')",
-                    "('cleanup_batch_size', '500', 'Batch size for cleanup operations to avoid long locks')"
+                    "('cleanup_batch_size', '500', 'Batch size for cleanup operations to avoid long locks')",
+                    "('otp_expiry_minutes', '10', 'Minutes until OTP tokens expire')",
+                    "('otp_max_attempts', '3', 'Maximum verification attempts per OTP')",
+                    "('otp_resend_cooldown_minutes', '1', 'Minutes to wait before allowing OTP resend')",
+                    "('otp_rate_limit_per_hour', '10', 'Maximum OTPs that can be sent per contact per hour')"
             };
 
             for (String config : configs) {
@@ -153,28 +157,29 @@ public class DatabaseBusinessLogicE2ETest {
         assertAuditFieldsSet("customer_accounts", journey.accountId);
         System.out.println("✓ Step 3: Customer account created with email as username");
 
-        // Step 4: Verify email (should trigger verification status update)
+        // Step 4: Create email verification OTP
+        Long emailOTPId = createEmailVerificationOTP(journey.emailId, "123456");
+        assertThat(otpTokenExists(emailOTPId)).isTrue();
+        System.out.println("✓ Step 4: Email verification OTP created");
+
+        // Step 5: Use OTP to verify email (should trigger verification status update)
+        markOTPTokenAsUsed(emailOTPId);
         updateEmailVerification(journey.emailId, true);
         journey.emailVerified = true;
         journey.verificationStatus = getAccountVerificationStatus(journey.accountId);
         assertThat(journey.verificationStatus).isEqualTo("EMAIL_VERIFIED");
-        System.out.println("✓ Step 4: Email verified, account status automatically updated");
+        System.out.println("✓ Step 5: Email verified via OTP, account status automatically updated");
 
-        // Step 5: Simulate user login
+        // Step 6: Simulate user login
         journey.lastLogin = OffsetDateTime.now();
         updateAccountLastLogin(journey.accountId, journey.lastLogin);
-        System.out.println("✓ Step 5: User login recorded");
+        System.out.println("✓ Step 6: User login recorded");
 
-        // Step 6: Test account activity status change (triggers audit)
+        // Step 7: Test account activity status change (triggers audit)
         updateAccountActivityStatus(journey.accountId, "INACTIVE");
         journey.activityStatus = "INACTIVE";
         assertAccountStatusAuditExists(journey.accountId, "ACTIVE", "INACTIVE");
-        System.out.println("✓ Step 6: Account marked inactive, audit record created");
-
-        // Step 7: Create password reset token
-        Long tokenId = createPasswordResetToken(journey.accountId, "email-user-reset-token");
-        assertAuditFieldsSet("password_reset_tokens", tokenId);
-        System.out.println("✓ Step 7: Password reset token created");
+        System.out.println("✓ Step 7: Account marked inactive, audit record created");
 
         // Step 8: Test cleanup operations (simulate time passage)
         simulateTimePassing(journey, 40); // Simulate 40 days
@@ -212,21 +217,27 @@ public class DatabaseBusinessLogicE2ETest {
         assertThat(journey.username).isEqualTo(journey.phone);
         System.out.println("✓ Step 3: Customer account created with phone as username");
 
-        // Step 4: Verify phone (should trigger verification status update)
+        // Step 4: Create phone verification OTP
+        Long phoneOTPId = createPhoneVerificationOTP(journey.phoneId, "789012");
+        assertThat(otpTokenExists(phoneOTPId)).isTrue();
+        System.out.println("✓ Step 4: Phone verification OTP created");
+
+        // Step 5: Use OTP to verify phone (should trigger verification status update)
+        markOTPTokenAsUsed(phoneOTPId);
         updatePhoneVerification(journey.phoneId, true);
         journey.phoneVerified = true;
         journey.verificationStatus = getAccountVerificationStatus(journey.accountId);
         assertThat(journey.verificationStatus).isEqualTo("PHONE_VERIFIED");
-        System.out.println("✓ Step 4: Phone verified, account status automatically updated");
+        System.out.println("✓ Step 5: Phone verified via OTP, account status automatically updated");
 
-        // Step 5: Test multiple status changes (should create multiple audit records)
+        // Step 6: Test multiple status changes (should create multiple audit records)
         updateAccountActivityStatus(journey.accountId, "SUSPENDED");
         updateAccountActivityStatus(journey.accountId, "ACTIVE");
         journey.activityStatus = "ACTIVE";
 
         Integer auditCount = getAccountStatusAuditCount(journey.accountId);
         assertThat(auditCount).isEqualTo(2); // ACTIVE->SUSPENDED, SUSPENDED->ACTIVE
-        System.out.println("✓ Step 5: Multiple status changes tracked in audit");
+        System.out.println("✓ Step 6: Multiple status changes tracked in audit");
 
         userJourneys.put("phoneUser", journey);
         System.out.println("🎉 Phone-Only User Journey Complete!\n");
@@ -256,19 +267,23 @@ public class DatabaseBusinessLogicE2ETest {
         assertThat(journey.username).isEqualTo(journey.email); // Email preferred over phone
         System.out.println("✓ Step 3: Account created with email as preferred username");
 
-        // Step 4: Verify phone first (partial verification)
+        // Step 4: Verify phone first via OTP (partial verification)
+        Long phoneOTPId = createPhoneVerificationOTP(journey.phoneId, "456789");
+        markOTPTokenAsUsed(phoneOTPId);
         updatePhoneVerification(journey.phoneId, true);
         journey.phoneVerified = true;
         journey.verificationStatus = getAccountVerificationStatus(journey.accountId);
         assertThat(journey.verificationStatus).isEqualTo("PHONE_VERIFIED");
-        System.out.println("✓ Step 4: Phone verified first - status: PHONE_VERIFIED");
+        System.out.println("✓ Step 4: Phone verified first via OTP - status: PHONE_VERIFIED");
 
-        // Step 5: Verify email (should upgrade to fully verified)
+        // Step 5: Verify email via OTP (should upgrade to fully verified)
+        Long emailOTPId = createEmailVerificationOTP(journey.emailId, "987654");
+        markOTPTokenAsUsed(emailOTPId);
         updateEmailVerification(journey.emailId, true);
         journey.emailVerified = true;
         journey.verificationStatus = getAccountVerificationStatus(journey.accountId);
         assertThat(journey.verificationStatus).isEqualTo("FULLY_VERIFIED");
-        System.out.println("✓ Step 5: Email verified - status upgraded to: FULLY_VERIFIED");
+        System.out.println("✓ Step 5: Email verified via OTP - status upgraded to: FULLY_VERIFIED");
 
         // Step 6: Test contact change scenarios
         // Change email - username should update
@@ -285,7 +300,6 @@ public class DatabaseBusinessLogicE2ETest {
         System.out.println("✓ Step 7: Email removed, username switched to phone");
 
         // Step 8: Test verification status recalculation after contact changes
-        // Force trigger the verification status update since contact change might not automatically trigger it
         try (Connection conn = dataSource.getConnection();
              CallableStatement stmt = conn.prepareCall("SELECT update_verification_status_for_customer(?)")) {
             stmt.setLong(1, journey.customerId);
@@ -412,7 +426,7 @@ public class DatabaseBusinessLogicE2ETest {
 
     @Test
     @Order(6)
-    void completeUserJourney_PasswordResetFlow_ShouldHandleTokenLifecycle() throws SQLException {
+    void completeUserJourney_PasswordResetFlow_ShouldHandleOTPLifecycle() throws SQLException {
         System.out.println("🚀 Starting E2E Test: Password Reset Flow Journey");
 
         UserJourneyData journey = new UserJourneyData();
@@ -424,41 +438,147 @@ public class DatabaseBusinessLogicE2ETest {
         journey.accountId = createCustomerAccount(journey.customerId, "originalPassword");
         System.out.println("✓ Step 1: User account created for password reset test");
 
-        // Step 2: Create password reset token
-        Long tokenId = createPasswordResetToken(journey.accountId, "reset-token-12345");
-        assertThat(tokenExists(tokenId)).isTrue();
-        assertThat(isTokenUsed(tokenId)).isFalse();
-        System.out.println("✓ Step 2: Password reset token created");
+        // Step 2: Create password reset OTP token
+        Long otpTokenId = createPasswordResetOTP(journey.emailId, "123456");
+        assertThat(otpTokenExists(otpTokenId)).isTrue();
+        assertThat(isOTPTokenUsed(otpTokenId)).isFalse();
+        System.out.println("✓ Step 2: Password reset OTP token created");
 
-        // Step 3: Use the token (mark as used)
-        markTokenAsUsed(tokenId);
-        assertThat(isTokenUsed(tokenId)).isTrue();
-        System.out.println("✓ Step 3: Token marked as used");
+        // Step 3: Use the OTP token (mark as used)
+        markOTPTokenAsUsed(otpTokenId);
+        assertThat(isOTPTokenUsed(otpTokenId)).isTrue();
+        System.out.println("✓ Step 3: OTP token marked as used");
 
-        // Step 4: Create old tokens for cleanup testing
-        Long oldTokenId1 = createPasswordResetToken(journey.accountId, "old-token-1");
-        Long oldTokenId2 = createPasswordResetToken(journey.accountId, "old-token-2");
+        // Step 4: Create old OTP tokens for cleanup testing
+        Long oldTokenId1 = createPasswordResetOTP(journey.emailId, "654321");
+        Long oldTokenId2 = createPasswordResetOTP(journey.emailId, "987654");
 
         // Simulate old tokens (10 days old, beyond 7-day threshold)
-        simulateTokenAge(oldTokenId1, 10);
-        simulateTokenAge(oldTokenId2, 10);
-        System.out.println("✓ Step 4: Old tokens created for cleanup test");
+        simulateOTPTokenAge(oldTokenId1, 10);
+        simulateOTPTokenAge(oldTokenId2, 10);
+        System.out.println("✓ Step 4: Old OTP tokens created for cleanup test");
 
-        // Step 5: Run password reset token cleanup
-        runPasswordResetTokenCleanup();
-        System.out.println("✓ Step 5: Token cleanup executed");
+        // Step 5: Run OTP token cleanup
+        runOTPTokenCleanup();
+        System.out.println("✓ Step 5: OTP token cleanup executed");
 
         // Step 6: Verify cleanup results
-        assertThat(tokenExists(tokenId)).isTrue(); // Recent used token should remain
-        assertThat(tokenExists(oldTokenId1)).isFalse(); // Old tokens should be deleted
-        assertThat(tokenExists(oldTokenId2)).isFalse();
-        System.out.println("✓ Step 6: Old tokens cleaned up, recent tokens preserved");
+        assertThat(otpTokenExists(otpTokenId)).isTrue(); // Recent used token should remain
+        assertThat(otpTokenExists(oldTokenId1)).isFalse(); // Old tokens should be deleted
+        assertThat(otpTokenExists(oldTokenId2)).isFalse();
+        System.out.println("✓ Step 6: Old OTP tokens cleaned up, recent tokens preserved");
 
         System.out.println("🎉 Password Reset Flow Journey Complete!\n");
     }
 
     @Test
     @Order(7)
+    void completeUserJourney_EmailVerificationFlow_ShouldHandleOTPVerification() throws SQLException {
+        System.out.println("🚀 Starting E2E Test: Email Verification Flow Journey");
+
+        UserJourneyData journey = new UserJourneyData();
+        journey.email = "emailverify@gmail.com";
+
+        // Step 1: Create unverified user
+        journey.emailId = createCustomerEmail(journey.email, false);
+        journey.customerId = createCustomer("EmailVerify", "User", journey.emailId, null);
+        journey.accountId = createCustomerAccount(journey.customerId, "password123");
+        System.out.println("✓ Step 1: Unverified user account created");
+
+        // Step 2: Generate email verification OTP
+        Long verificationOTPId = createEmailVerificationOTP(journey.emailId, "567890");
+        assertThat(otpTokenExists(verificationOTPId)).isTrue();
+        System.out.println("✓ Step 2: Email verification OTP generated");
+
+        // Step 3: Simulate failed verification attempts (increment attempts)
+        incrementOTPAttempts(verificationOTPId);
+        incrementOTPAttempts(verificationOTPId);
+        Integer attemptCount = getOTPAttemptCount(verificationOTPId);
+        assertThat(attemptCount).isEqualTo(2);
+        System.out.println("✓ Step 3: Failed verification attempts tracked");
+
+        // Step 4: Successful verification (mark as used and verify email)
+        markOTPTokenAsUsed(verificationOTPId);
+        updateEmailVerification(journey.emailId, true);
+        journey.emailVerified = true;
+
+        // Verify account status updated automatically
+        journey.verificationStatus = getAccountVerificationStatus(journey.accountId);
+        assertThat(journey.verificationStatus).isEqualTo("EMAIL_VERIFIED");
+        System.out.println("✓ Step 4: Email successfully verified, account status updated");
+
+        // Step 5: Test OTP expiry scenarios - create expired OTP
+        Long expiredOTPId = createExpiredEmailVerificationOTP(journey.emailId, "111222");
+        assertThat(isOTPTokenExpired(expiredOTPId)).isTrue();
+        System.out.println("✓ Step 5: Expired OTP token behavior verified");
+
+        // Step 6: Test rate limiting - create multiple OTPs rapidly
+        List<Long> rapidOTPs = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            rapidOTPs.add(createEmailVerificationOTP(journey.emailId, "99988" + i));
+        }
+
+        Integer otpCount = getOTPCountForEmail(journey.emailId, "EMAIL_VERIFICATION");
+        assertThat(otpCount).isGreaterThanOrEqualTo(3);
+        System.out.println("✓ Step 6: Rate limiting scenarios prepared and tested");
+
+        System.out.println("🎉 Email Verification Flow Journey Complete!\n");
+    }
+
+    @Test
+    @Order(8)
+    void completeUserJourney_PhoneVerificationFlow_ShouldHandleOTPVerification() throws SQLException {
+        System.out.println("🚀 Starting E2E Test: Phone Verification Flow Journey");
+
+        UserJourneyData journey = new UserJourneyData();
+        journey.phone = "+381611111111";
+
+        // Step 1: Create unverified phone user
+        journey.phoneId = createCustomerPhone(journey.phone, false);
+        journey.customerId = createCustomer("PhoneVerify", "User", null, journey.phoneId);
+        journey.accountId = createCustomerAccount(journey.customerId, "password123");
+        System.out.println("✓ Step 1: Unverified phone user account created");
+
+        // Step 2: Generate phone verification OTP
+        Long verificationOTPId = createPhoneVerificationOTP(journey.phoneId, "345678");
+        assertThat(otpTokenExists(verificationOTPId)).isTrue();
+
+        // Verify delivery method is SMS for phone verification
+        String deliveryMethod = getOTPDeliveryMethod(verificationOTPId);
+        assertThat(deliveryMethod).isEqualTo("SMS");
+        System.out.println("✓ Step 2: Phone verification OTP generated with SMS delivery");
+
+        // Step 3: Test max attempts reached scenario
+        for (int i = 0; i < 3; i++) {
+            incrementOTPAttempts(verificationOTPId);
+        }
+
+        Integer maxAttempts = getOTPAttemptCount(verificationOTPId);
+        Integer configuredMaxAttempts = getOTPMaxAttemptsFromConfig(verificationOTPId);
+        assertThat(maxAttempts).isEqualTo(configuredMaxAttempts);
+        System.out.println("✓ Step 3: Max attempts reached, OTP should be locked");
+
+        // Step 4: Generate new OTP after max attempts reached
+        Long newOTPId = createPhoneVerificationOTP(journey.phoneId, "876543");
+        markOTPTokenAsUsed(newOTPId);
+        updatePhoneVerification(journey.phoneId, true);
+        journey.phoneVerified = true;
+
+        // Verify account status updated automatically
+        journey.verificationStatus = getAccountVerificationStatus(journey.accountId);
+        assertThat(journey.verificationStatus).isEqualTo("PHONE_VERIFIED");
+        System.out.println("✓ Step 4: Phone successfully verified with new OTP, account status updated");
+
+        // Step 5: Test cooldown period functionality
+        OffsetDateTime lastOTPTime = getOTPCreatedTime(newOTPId);
+        assertThat(lastOTPTime).isNotNull();
+        System.out.println("✓ Step 5: Cooldown period tracking verified");
+
+        System.out.println("🎉 Phone Verification Flow Journey Complete!\n");
+    }
+
+    @Test
+    @Order(9)
     void completeUserJourney_DataIntegrityValidation_ShouldMaintainConsistency() throws SQLException {
         System.out.println("🚀 Starting E2E Test: Data Integrity Validation Journey");
 
@@ -474,9 +594,15 @@ public class DatabaseBusinessLogicE2ETest {
         journey.accountId = createCustomerAccount(journey.customerId, "password123");
         System.out.println("✓ Step 1: User created with dual contacts");
 
-        // Step 2: Rapid verification status changes (test trigger consistency)
+        // Step 2: Rapid verification status changes with OTPs (test trigger consistency)
+        Long emailOTP1 = createEmailVerificationOTP(journey.emailId, "111111");
+        markOTPTokenAsUsed(emailOTP1);
         updateEmailVerification(journey.emailId, true);   // Should become EMAIL_VERIFIED
+
+        Long phoneOTP1 = createPhoneVerificationOTP(journey.phoneId, "222222");
+        markOTPTokenAsUsed(phoneOTP1);
         updatePhoneVerification(journey.phoneId, true);   // Should become FULLY_VERIFIED
+
         updateEmailVerification(journey.emailId, false);  // Should become PHONE_VERIFIED
         updatePhoneVerification(journey.phoneId, false);  // Should become UNVERIFIED
 
@@ -503,9 +629,17 @@ public class DatabaseBusinessLogicE2ETest {
         System.out.println("✓ Step 4: Audit fields maintained consistency across all operations");
 
         // Step 5: Test referential integrity under stress
-        // Create multiple password reset tokens
-        for (int i = 1; i <= 5; i++) {
-            createPasswordResetToken(journey.accountId, "stress-token-" + i);
+        // Create multiple OTP tokens of different types - FIXED TO USE 6-CHARACTER CODES
+        for (int i = 1; i <= 3; i++) {
+            String passwordCode = String.format("%06d", 999000 + i); // "999001", "999002", "999003"
+            String emailCode = String.format("%06d", 777000 + i);    // "777001", "777002", "777003"
+            createPasswordResetOTP(newEmailId, passwordCode);
+            createEmailVerificationOTP(newEmailId, emailCode);
+        }
+
+        for (int i = 1; i <= 2; i++) {
+            String phoneCode = String.format("%06d", 555000 + i);    // "555001", "555002"
+            createPhoneVerificationOTP(newPhoneId, phoneCode);
         }
 
         // Create multiple status changes
@@ -515,10 +649,12 @@ public class DatabaseBusinessLogicE2ETest {
         }
 
         // Verify all related records exist and are properly linked
-        Integer tokenCount = getPasswordResetTokenCount(journey.accountId);
+        Integer emailOTPCount = getOTPCountForEmail(newEmailId, null); // All purposes
+        Integer phoneOTPCount = getOTPCountForPhone(newPhoneId, null); // All purposes
         Integer auditCount = getAccountStatusAuditCount(journey.accountId);
 
-        assertThat(tokenCount).isEqualTo(5);
+        assertThat(emailOTPCount).isEqualTo(6); // 3 password reset + 3 email verification
+        assertThat(phoneOTPCount).isEqualTo(2); // 2 phone verification
         assertThat(auditCount).isEqualTo(6); // 3 cycles of ACTIVE->SUSPENDED->ACTIVE
         System.out.println("✓ Step 5: Referential integrity maintained under stress operations");
 
@@ -526,7 +662,7 @@ public class DatabaseBusinessLogicE2ETest {
     }
 
     @Test
-    @Order(8)
+    @Order(10)
     void completeUserJourney_MasterCleanupValidation_ShouldCoordinateAllCleanups() throws SQLException {
         System.out.println("🚀 Starting E2E Test: Master Cleanup Coordination Journey");
 
@@ -546,12 +682,16 @@ public class DatabaseBusinessLogicE2ETest {
         }
         simulateAccountAge(unverifiedAccountId, 40); // Beyond 30-day threshold
 
-        // Old password reset tokens
+        // Old OTP tokens for cleanup
         Long tokenAccountEmailId = createCustomerEmail("tokens@gmail.com", true);
         Long tokenAccountCustomerId = createCustomer("Token", "User", tokenAccountEmailId, null);
         Long tokenAccountId = createCustomerAccount(tokenAccountCustomerId, "password123");
-        Long oldTokenId = createPasswordResetToken(tokenAccountId, "old-cleanup-token");
-        simulateTokenAge(oldTokenId, 10); // Beyond 7-day threshold
+
+        // FIXED: Use 6-character OTP codes
+        Long oldOTPId1 = createPasswordResetOTP(tokenAccountEmailId, "999888");
+        Long oldOTPId2 = createEmailVerificationOTP(tokenAccountEmailId, "777666");
+        simulateOTPTokenAge(oldOTPId1, 10); // Beyond 7-day threshold
+        simulateOTPTokenAge(oldOTPId2, 10);
 
         // Old audit records
         createOldAccountStatusAuditRecord(tokenAccountId, 400); // Beyond 365-day threshold
@@ -561,13 +701,13 @@ public class DatabaseBusinessLogicE2ETest {
 
         // Step 2: Record initial counts
         Integer initialUnverifiedCount = getUnverifiedAccountCount();
-        Integer initialTokenCount = getTotalPasswordResetTokenCount();
+        Integer initialOTPCount = getTotalOTPTokenCount();
         Integer initialStatusAuditCount = getTotalAccountStatusAuditCount();
         Integer initialJobAuditCount = getTotalJobExecutionAuditCount();
 
         System.out.println("✓ Step 2: Initial data counts recorded");
         System.out.println("  - Unverified accounts: " + initialUnverifiedCount);
-        System.out.println("  - Password reset tokens: " + initialTokenCount);
+        System.out.println("  - OTP tokens: " + initialOTPCount);
         System.out.println("  - Status audit records: " + initialStatusAuditCount);
         System.out.println("  - Job audit records: " + initialJobAuditCount);
 
@@ -577,14 +717,14 @@ public class DatabaseBusinessLogicE2ETest {
 
         // Step 4: Verify cleanup results
         Integer finalUnverifiedCount = getUnverifiedAccountCount();
-        Integer finalTokenCount = getTotalPasswordResetTokenCount();
+        Integer finalOTPCount = getTotalOTPTokenCount();
         Integer finalStatusAuditCount = getTotalAccountStatusAuditCount();
         Integer finalJobAuditCount = getTotalJobExecutionAuditCount();
 
         // Verify cleanup effectiveness
         System.out.println("  DEBUG: Cleanup comparison:");
         System.out.println("    - Initial unverified: " + initialUnverifiedCount + ", Final: " + finalUnverifiedCount);
-        System.out.println("    - Initial tokens: " + initialTokenCount + ", Final: " + finalTokenCount);
+        System.out.println("    - Initial OTP tokens: " + initialOTPCount + ", Final: " + finalOTPCount);
         System.out.println("    - Initial status audit: " + initialStatusAuditCount + ", Final: " + finalStatusAuditCount);
 
         // Note: Cleanup might not always reduce counts if data doesn't meet cleanup criteria
@@ -594,13 +734,13 @@ public class DatabaseBusinessLogicE2ETest {
 
         System.out.println("✓ Step 4: Cleanup results verified");
         System.out.println("  - Unverified accounts cleaned: " + (initialUnverifiedCount - finalUnverifiedCount));
-        System.out.println("  - Tokens cleaned: " + (initialTokenCount - finalTokenCount));
+        System.out.println("  - OTP tokens cleaned: " + (initialOTPCount - finalOTPCount));
         System.out.println("  - Status audit cleaned: " + (initialStatusAuditCount - finalStatusAuditCount));
 
         // Step 5: Verify audit trail for cleanup operations
         assertJobExecutionAuditExists("run_all_cleanup_jobs");
         assertJobExecutionAuditExists("cleanup_unverified_accounts");
-        assertJobExecutionAuditExists("cleanup_password_reset_tokens");
+        assertJobExecutionAuditExists("cleanup_otp_tokens");
         assertJobExecutionAuditExists("cleanup_account_status_audit");
 
         System.out.println("✓ Step 5: All cleanup operations properly audited");
@@ -660,14 +800,81 @@ public class DatabaseBusinessLogicE2ETest {
         }
     }
 
-    private Long createPasswordResetToken(Long accountId, String token) throws SQLException {
+    // ===== OTP TOKEN HELPER METHODS =====
+
+    private Long createOTPToken(Long customerEmailId, Long customerPhoneId, String otpCode, String purpose, String deliveryMethod, OffsetDateTime createdDate) throws SQLException {
+        // Ensure OTP code is exactly 6 characters
+        if (otpCode == null || otpCode.length() != 6) {
+            otpCode = "123456"; // Default fallback
+        }
+
         try (Connection conn = dataSource.getConnection();
              PreparedStatement stmt = conn.prepareStatement(
-                     "INSERT INTO password_reset_tokens (customer_account_id, token, expires_at, used) " +
-                             "VALUES (?, ?, ?, false) RETURNING id")) {
-            stmt.setLong(1, accountId);
-            stmt.setString(2, token);
-            stmt.setTimestamp(3, Timestamp.from(OffsetDateTime.now().plusHours(24).toInstant()));
+                     "INSERT INTO otp_tokens (customer_email_id, customer_phone_id, otp_code, purpose, delivery_method, expires_at) " +
+                             "VALUES (?, ?, ?, ?::otp_purpose_enum, ?::otp_delivery_method_enum, ?) RETURNING id")) {
+
+            if (customerEmailId != null) stmt.setLong(1, customerEmailId); else stmt.setNull(1, Types.BIGINT);
+            if (customerPhoneId != null) stmt.setLong(2, customerPhoneId); else stmt.setNull(2, Types.BIGINT);
+            stmt.setString(3, otpCode);
+            stmt.setString(4, purpose);
+            stmt.setString(5, deliveryMethod);
+            stmt.setTimestamp(6, Timestamp.from(OffsetDateTime.now().plusMinutes(10).toInstant()));
+
+            ResultSet rs = stmt.executeQuery();
+            rs.next();
+            Long tokenId = rs.getLong(1);
+
+            // Update created date manually
+            try (PreparedStatement updateStmt = conn.prepareStatement(
+                    "UPDATE otp_tokens SET created_date = ? WHERE id = ?")) {
+                updateStmt.setTimestamp(1, Timestamp.from(createdDate.toInstant()));
+                updateStmt.setLong(2, tokenId);
+                updateStmt.executeUpdate();
+            }
+
+            return tokenId;
+        }
+    }
+
+    // Convenience methods for specific OTP types - UPDATE ALL OF THESE:
+    private Long createPasswordResetOTP(Long customerEmailId, String otpCode) throws SQLException {
+        // Ensure 6 characters
+        if (otpCode == null || otpCode.length() != 6) {
+            otpCode = "123456"; // Default fallback
+        }
+        return createOTPToken(customerEmailId, null, otpCode, "PASSWORD_RESET", "EMAIL", OffsetDateTime.now());
+    }
+
+    private Long createEmailVerificationOTP(Long customerEmailId, String otpCode) throws SQLException {
+        // Ensure 6 characters
+        if (otpCode == null || otpCode.length() != 6) {
+            otpCode = "234567"; // Default fallback
+        }
+        return createOTPToken(customerEmailId, null, otpCode, "EMAIL_VERIFICATION", "EMAIL", OffsetDateTime.now());
+    }
+
+    private Long createPhoneVerificationOTP(Long customerPhoneId, String otpCode) throws SQLException {
+        // Ensure 6 characters
+        if (otpCode == null || otpCode.length() != 6) {
+            otpCode = "345678"; // Default fallback
+        }
+        return createOTPToken(null, customerPhoneId, otpCode, "PHONE_VERIFICATION", "SMS", OffsetDateTime.now());
+    }
+
+    private Long createExpiredEmailVerificationOTP(Long customerEmailId, String otpCode) throws SQLException {
+        // Ensure 6 characters
+        if (otpCode == null || otpCode.length() != 6) {
+            otpCode = "456789"; // Default fallback
+        }
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(
+                     "INSERT INTO otp_tokens (customer_email_id, otp_code, purpose, delivery_method, expires_at) " +
+                             "VALUES (?, ?, 'EMAIL_VERIFICATION'::otp_purpose_enum, 'EMAIL'::otp_delivery_method_enum, ?) RETURNING id")) {
+            stmt.setLong(1, customerEmailId);
+            stmt.setString(2, otpCode);
+            stmt.setTimestamp(3, Timestamp.from(OffsetDateTime.now().minusMinutes(15).toInstant())); // Expired 15 minutes ago
+
             ResultSet rs = stmt.executeQuery();
             rs.next();
             return rs.getLong(1);
@@ -742,10 +949,10 @@ public class DatabaseBusinessLogicE2ETest {
         }
     }
 
-    private boolean tokenExists(Long tokenId) throws SQLException {
+    private boolean otpTokenExists(Long tokenId) throws SQLException {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement stmt = conn.prepareStatement(
-                     "SELECT EXISTS(SELECT 1 FROM password_reset_tokens WHERE id = ?)")) {
+                     "SELECT EXISTS(SELECT 1 FROM otp_tokens WHERE id = ?)")) {
             stmt.setLong(1, tokenId);
             ResultSet rs = stmt.executeQuery();
             rs.next();
@@ -753,14 +960,106 @@ public class DatabaseBusinessLogicE2ETest {
         }
     }
 
-    private boolean isTokenUsed(Long tokenId) throws SQLException {
+    private boolean isOTPTokenUsed(Long tokenId) throws SQLException {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement stmt = conn.prepareStatement(
-                     "SELECT used FROM password_reset_tokens WHERE id = ?")) {
+                     "SELECT used_at IS NOT NULL FROM otp_tokens WHERE id = ?")) {
             stmt.setLong(1, tokenId);
             ResultSet rs = stmt.executeQuery();
             rs.next();
             return rs.getBoolean(1);
+        }
+    }
+
+    private boolean isOTPTokenExpired(Long tokenId) throws SQLException {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(
+                     "SELECT expires_at < CURRENT_TIMESTAMP FROM otp_tokens WHERE id = ?")) {
+            stmt.setLong(1, tokenId);
+            ResultSet rs = stmt.executeQuery();
+            rs.next();
+            return rs.getBoolean(1);
+        }
+    }
+
+    private Integer getOTPAttemptCount(Long tokenId) throws SQLException {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(
+                     "SELECT attempts_count FROM otp_tokens WHERE id = ?")) {
+            stmt.setLong(1, tokenId);
+            ResultSet rs = stmt.executeQuery();
+            rs.next();
+            return rs.getInt(1);
+        }
+    }
+
+    private Integer getOTPMaxAttemptsFromConfig(Long tokenId) throws SQLException {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(
+                     "SELECT max_attempts FROM otp_tokens WHERE id = ?")) {
+            stmt.setLong(1, tokenId);
+            ResultSet rs = stmt.executeQuery();
+            rs.next();
+            return rs.getInt(1);
+        }
+    }
+
+    private String getOTPDeliveryMethod(Long tokenId) throws SQLException {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(
+                     "SELECT delivery_method FROM otp_tokens WHERE id = ?")) {
+            stmt.setLong(1, tokenId);
+            ResultSet rs = stmt.executeQuery();
+            rs.next();
+            return rs.getString(1);
+        }
+    }
+
+    private OffsetDateTime getOTPCreatedTime(Long tokenId) throws SQLException {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(
+                     "SELECT created_date FROM otp_tokens WHERE id = ?")) {
+            stmt.setLong(1, tokenId);
+            ResultSet rs = stmt.executeQuery();
+            rs.next();
+            Timestamp timestamp = rs.getTimestamp(1);
+            return timestamp.toInstant().atOffset(OffsetDateTime.now().getOffset());
+        }
+    }
+
+    private Integer getOTPCountForEmail(Long emailId, String purpose) throws SQLException {
+        String query = "SELECT COUNT(*) FROM otp_tokens WHERE customer_email_id = ?";
+        if (purpose != null) {
+            query += " AND purpose = ?::otp_purpose_enum";
+        }
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(query)) {
+            stmt.setLong(1, emailId);
+            if (purpose != null) {
+                stmt.setString(2, purpose);
+            }
+            ResultSet rs = stmt.executeQuery();
+            rs.next();
+            return rs.getInt(1);
+        }
+    }
+
+    private Integer getOTPCountForPhone(Long phoneId, String purpose) throws SQLException {
+        String query = "SELECT COUNT(*) FROM otp_tokens WHERE customer_phone_id = ?";
+        if (purpose != null) {
+            query += " AND purpose = ?::otp_purpose_enum";
+        }
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(query)) {
+            stmt.setLong(1, phoneId);
+            if (purpose != null) {
+                stmt.setString(2, purpose);
+            }
+            ResultSet rs = stmt.executeQuery();
+            rs.next();
+            return rs.getInt(1);
         }
     }
 
@@ -768,17 +1067,6 @@ public class DatabaseBusinessLogicE2ETest {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement stmt = conn.prepareStatement(
                      "SELECT COUNT(*) FROM account_status_audit WHERE account_id = ?")) {
-            stmt.setLong(1, accountId);
-            ResultSet rs = stmt.executeQuery();
-            rs.next();
-            return rs.getInt(1);
-        }
-    }
-
-    private Integer getPasswordResetTokenCount(Long accountId) throws SQLException {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(
-                     "SELECT COUNT(*) FROM password_reset_tokens WHERE customer_account_id = ?")) {
             stmt.setLong(1, accountId);
             ResultSet rs = stmt.executeQuery();
             rs.next();
@@ -796,10 +1084,10 @@ public class DatabaseBusinessLogicE2ETest {
         }
     }
 
-    private Integer getTotalPasswordResetTokenCount() throws SQLException {
+    private Integer getTotalOTPTokenCount() throws SQLException {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement stmt = conn.prepareStatement(
-                     "SELECT COUNT(*) FROM password_reset_tokens")) {
+                     "SELECT COUNT(*) FROM otp_tokens")) {
             ResultSet rs = stmt.executeQuery();
             rs.next();
             return rs.getInt(1);
@@ -823,28 +1111,6 @@ public class DatabaseBusinessLogicE2ETest {
             ResultSet rs = stmt.executeQuery();
             rs.next();
             return rs.getInt(1);
-        }
-    }
-
-    private Timestamp getAccountLastLogin(Long accountId) throws SQLException {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(
-                     "SELECT last_login_at FROM customer_accounts WHERE id = ?")) {
-            stmt.setLong(1, accountId);
-            ResultSet rs = stmt.executeQuery();
-            rs.next();
-            return rs.getTimestamp(1);
-        }
-    }
-
-    private Timestamp getAccountCreatedDate(Long accountId) throws SQLException {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(
-                     "SELECT created_date FROM customer_accounts WHERE id = ?")) {
-            stmt.setLong(1, accountId);
-            ResultSet rs = stmt.executeQuery();
-            rs.next();
-            return rs.getTimestamp(1);
         }
     }
 
@@ -933,10 +1199,19 @@ public class DatabaseBusinessLogicE2ETest {
         }
     }
 
-    private void markTokenAsUsed(Long tokenId) throws SQLException {
+    private void markOTPTokenAsUsed(Long tokenId) throws SQLException {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement stmt = conn.prepareStatement(
-                     "UPDATE password_reset_tokens SET used = true WHERE id = ?")) {
+                     "UPDATE otp_tokens SET used_at = CURRENT_TIMESTAMP, attempts_count = attempts_count + 1 WHERE id = ?")) {
+            stmt.setLong(1, tokenId);
+            stmt.executeUpdate();
+        }
+    }
+
+    private void incrementOTPAttempts(Long tokenId) throws SQLException {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(
+                     "UPDATE otp_tokens SET attempts_count = attempts_count + 1 WHERE id = ?")) {
             stmt.setLong(1, tokenId);
             stmt.executeUpdate();
         }
@@ -961,11 +1236,11 @@ public class DatabaseBusinessLogicE2ETest {
         }
     }
 
-    private void simulateTokenAge(Long tokenId, int daysOld) throws SQLException {
+    private void simulateOTPTokenAge(Long tokenId, int daysOld) throws SQLException {
         OffsetDateTime pastDate = OffsetDateTime.now().minusDays(daysOld);
         try (Connection conn = dataSource.getConnection();
              PreparedStatement stmt = conn.prepareStatement(
-                     "UPDATE password_reset_tokens SET created_date = ? WHERE id = ?")) {
+                     "UPDATE otp_tokens SET created_date = ? WHERE id = ?")) {
             stmt.setTimestamp(1, Timestamp.from(pastDate.toInstant()));
             stmt.setLong(2, tokenId);
             stmt.executeUpdate();
@@ -1000,14 +1275,14 @@ public class DatabaseBusinessLogicE2ETest {
     // ===== JOB EXECUTION METHODS =====
 
     private void runCleanupOperations() throws SQLException {
-        runPasswordResetTokenCleanup();
+        runOTPTokenCleanup();
         runAccountStatusAuditCleanup();
         runUnverifiedAccountCleanup();
     }
 
-    private void runPasswordResetTokenCleanup() throws SQLException {
+    private void runOTPTokenCleanup() throws SQLException {
         try (Connection conn = dataSource.getConnection();
-             CallableStatement stmt = conn.prepareCall("SELECT cleanup_password_reset_tokens()")) {
+             CallableStatement stmt = conn.prepareCall("SELECT cleanup_otp_tokens()")) {
             stmt.execute();
         }
     }

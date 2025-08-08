@@ -35,7 +35,7 @@ public class DatabaseViewsIntegrationTest {
     @BeforeEach
     void cleanupDatabase() {
         // Clean all tables except business_config (preserve seeded values)
-        jdbcTemplate.execute("TRUNCATE TABLE password_reset_tokens CASCADE");
+        jdbcTemplate.execute("TRUNCATE TABLE otp_tokens CASCADE");  // Changed from password_reset_tokens
         jdbcTemplate.execute("TRUNCATE TABLE customer_accounts CASCADE");
         jdbcTemplate.execute("TRUNCATE TABLE customers CASCADE");
         jdbcTemplate.execute("TRUNCATE TABLE customer_emails CASCADE");
@@ -48,7 +48,7 @@ public class DatabaseViewsIntegrationTest {
         jdbcTemplate.execute("ALTER SEQUENCE customer_phones_id_seq RESTART WITH 1");
         jdbcTemplate.execute("ALTER SEQUENCE customers_id_seq RESTART WITH 1");
         jdbcTemplate.execute("ALTER SEQUENCE customer_accounts_id_seq RESTART WITH 1");
-        jdbcTemplate.execute("ALTER SEQUENCE password_reset_tokens_id_seq RESTART WITH 1");
+        jdbcTemplate.execute("ALTER SEQUENCE otp_tokens_id_seq RESTART WITH 1");  // Changed from password_reset_tokens_id_seq
         jdbcTemplate.execute("ALTER SEQUENCE account_status_audit_id_seq RESTART WITH 1");
         jdbcTemplate.execute("ALTER SEQUENCE job_execution_audit_id_seq RESTART WITH 1");
     }

@@ -2,7 +2,6 @@ package com.bizwaresol.loyalty_service_club_api.database;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Disabled;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
@@ -40,7 +39,7 @@ public class DatabaseJobsIntegrationTest {
     @BeforeEach
     void cleanupDatabase() {
         // Clean all tables EXCEPT business_config (preserve seed data)
-        jdbcTemplate.execute("TRUNCATE TABLE password_reset_tokens CASCADE");
+        jdbcTemplate.execute("TRUNCATE TABLE otp_tokens CASCADE");
         jdbcTemplate.execute("TRUNCATE TABLE customer_accounts CASCADE");
         jdbcTemplate.execute("TRUNCATE TABLE customers CASCADE");
         jdbcTemplate.execute("TRUNCATE TABLE customer_emails CASCADE");
@@ -53,7 +52,7 @@ public class DatabaseJobsIntegrationTest {
         jdbcTemplate.execute("ALTER SEQUENCE customer_phones_id_seq RESTART WITH 1");
         jdbcTemplate.execute("ALTER SEQUENCE customers_id_seq RESTART WITH 1");
         jdbcTemplate.execute("ALTER SEQUENCE customer_accounts_id_seq RESTART WITH 1");
-        jdbcTemplate.execute("ALTER SEQUENCE password_reset_tokens_id_seq RESTART WITH 1");
+        jdbcTemplate.execute("ALTER SEQUENCE otp_tokens_id_seq RESTART WITH 1");
         jdbcTemplate.execute("ALTER SEQUENCE account_status_audit_id_seq RESTART WITH 1");
         jdbcTemplate.execute("ALTER SEQUENCE job_execution_audit_id_seq RESTART WITH 1");
 
@@ -65,14 +64,18 @@ public class DatabaseJobsIntegrationTest {
         // Reset configuration values to defaults without deleting/recreating records
         // This preserves the records but ensures consistent test state
 
-        Map<String, String> defaultConfigs = Map.of(
-                "account_inactivity_days", "60",
-                "inactivity_batch_size", "1000",
-                "password_reset_token_cleanup_days", "7",
-                "job_execution_audit_cleanup_days", "90",
-                "account_status_audit_cleanup_days", "365",
-                "unverified_account_cleanup_days", "30",
-                "cleanup_batch_size", "500"
+        Map<String, String> defaultConfigs = Map.ofEntries(
+                Map.entry("account_inactivity_days", "60"),
+                Map.entry("inactivity_batch_size", "1000"),
+                Map.entry("otp_token_cleanup_days", "7"),
+                Map.entry("job_execution_audit_cleanup_days", "90"),
+                Map.entry("account_status_audit_cleanup_days", "365"),
+                Map.entry("unverified_account_cleanup_days", "30"),
+                Map.entry("cleanup_batch_size", "500"),
+                Map.entry("otp_expiry_minutes", "10"),
+                Map.entry("otp_max_attempts", "3"),
+                Map.entry("otp_resend_cooldown_minutes", "1"),
+                Map.entry("otp_rate_limit_per_hour", "10")
         );
 
         for (Map.Entry<String, String> config : defaultConfigs.entrySet()) {
@@ -87,14 +90,18 @@ public class DatabaseJobsIntegrationTest {
     }
 
     private void ensureRequiredConfigsExist() {
-        Map<String, String> requiredConfigs = Map.of(
-                "account_inactivity_days", "60",
-                "inactivity_batch_size", "1000",
-                "password_reset_token_cleanup_days", "7",
-                "job_execution_audit_cleanup_days", "90",
-                "account_status_audit_cleanup_days", "365",
-                "unverified_account_cleanup_days", "30",
-                "cleanup_batch_size", "500"
+        Map<String, String> requiredConfigs = Map.ofEntries(
+                Map.entry("account_inactivity_days", "60"),
+                Map.entry("inactivity_batch_size", "1000"),
+                Map.entry("otp_token_cleanup_days", "7"),
+                Map.entry("job_execution_audit_cleanup_days", "90"),
+                Map.entry("account_status_audit_cleanup_days", "365"),
+                Map.entry("unverified_account_cleanup_days", "30"),
+                Map.entry("cleanup_batch_size", "500"),
+                Map.entry("otp_expiry_minutes", "10"),
+                Map.entry("otp_max_attempts", "3"),
+                Map.entry("otp_resend_cooldown_minutes", "1"),
+                Map.entry("otp_rate_limit_per_hour", "10")
         );
 
         for (Map.Entry<String, String> config : requiredConfigs.entrySet()) {
@@ -120,7 +127,7 @@ public class DatabaseJobsIntegrationTest {
         // Test that all job functions exist and are callable
         String[] jobFunctions = {
                 "mark_inactive_accounts_batched",
-                "cleanup_password_reset_tokens",
+                "cleanup_otp_tokens",
                 "cleanup_job_execution_audit",
                 "cleanup_account_status_audit",
                 "cleanup_unverified_accounts",
@@ -147,14 +154,18 @@ public class DatabaseJobsIntegrationTest {
     @Test
     void businessConfiguration_ShouldExistForAllJobs() {
         // Test that required configuration exists for all job executions
-        Map<String, String> requiredConfigs = Map.of(
-                "account_inactivity_days", "60",
-                "inactivity_batch_size", "1000",
-                "password_reset_token_cleanup_days", "7",
-                "job_execution_audit_cleanup_days", "90",
-                "account_status_audit_cleanup_days", "365",
-                "unverified_account_cleanup_days", "30",
-                "cleanup_batch_size", "500"
+        Map<String, String> requiredConfigs = Map.ofEntries(
+                Map.entry("account_inactivity_days", "60"),
+                Map.entry("inactivity_batch_size", "1000"),
+                Map.entry("otp_token_cleanup_days", "7"),
+                Map.entry("job_execution_audit_cleanup_days", "90"),
+                Map.entry("account_status_audit_cleanup_days", "365"),
+                Map.entry("unverified_account_cleanup_days", "30"),
+                Map.entry("cleanup_batch_size", "500"),
+                Map.entry("otp_expiry_minutes", "10"),
+                Map.entry("otp_max_attempts", "3"),
+                Map.entry("otp_resend_cooldown_minutes", "1"),
+                Map.entry("otp_rate_limit_per_hour", "10")
         );
 
         for (Map.Entry<String, String> config : requiredConfigs.entrySet()) {
@@ -203,7 +214,7 @@ public class DatabaseJobsIntegrationTest {
         setupTestDataForCleanupJobs();
 
         String[] cleanupFunctions = {
-                "cleanup_password_reset_tokens",
+                "cleanup_otp_tokens",
                 "cleanup_account_status_audit",
                 "cleanup_unverified_accounts"
         };
@@ -221,32 +232,33 @@ public class DatabaseJobsIntegrationTest {
     }
 
     @Test
-    void cleanupPasswordResetTokens_WithOldTokens_ShouldProcessCorrectly() {
-        // Arrange - Create old password reset tokens
+    void cleanupOtpTokens_WithOldTokens_ShouldProcessCorrectly() {
+        // Arrange - Create old OTP tokens with different purposes
         Long emailId = createCustomerEmail("cleanup@gmail.com", true);
-        Long customerId = createCustomer("Cleanup", "Test", emailId, null);
-        Long accountId = createCustomerAccount(customerId, "cleanup@gmail.com");
+        Long phoneId = createCustomerPhone("+381123456789", true);
+        Long customerId = createCustomer("Cleanup", "Test", emailId, phoneId);
 
-        // Create tokens - some old, some recent
-        createPasswordResetToken(accountId, "old-token", OffsetDateTime.now().minusDays(10)); // Old
-        createPasswordResetToken(accountId, "recent-token", OffsetDateTime.now().minusDays(2)); // Recent
+        // Create various OTP tokens - some old, some recent - FIXED TO 6 CHARACTERS
+        createOtpToken(emailId, null, "123456", "PASSWORD_RESET", "EMAIL", OffsetDateTime.now().minusDays(10)); // Old
+        createOtpToken(emailId, null, "789012", "EMAIL_VERIFICATION", "EMAIL", OffsetDateTime.now().minusDays(8)); // Old
+        createOtpToken(null, phoneId, "345678", "PHONE_VERIFICATION", "SMS", OffsetDateTime.now().minusDays(2)); // Recent
 
         // Act
         try (Connection conn = dataSource.getConnection();
-             CallableStatement stmt = conn.prepareCall("SELECT cleanup_password_reset_tokens()")) {
+             CallableStatement stmt = conn.prepareCall("SELECT cleanup_otp_tokens()")) {
             stmt.execute();
         } catch (SQLException e) {
-            throw new RuntimeException("Password reset token cleanup failed", e);
+            throw new RuntimeException("OTP token cleanup failed", e);
         }
 
-        // Assert - Should have processed the old token
+        // Assert - Should have processed the old tokens
         Integer processedCount = jdbcTemplate.queryForObject(
-                "SELECT records_processed FROM job_execution_audit WHERE job_name = 'cleanup_password_reset_tokens' " +
+                "SELECT records_processed FROM job_execution_audit WHERE job_name = 'cleanup_otp_tokens' " +
                         "AND execution_date = CURRENT_DATE ORDER BY created_date DESC LIMIT 1",
                 Integer.class);
 
-        assertThat(processedCount).isGreaterThanOrEqualTo(1);
-        System.out.println("SUCCESS: Password reset token cleanup processed " + processedCount + " tokens");
+        assertThat(processedCount).isGreaterThanOrEqualTo(2);
+        System.out.println("SUCCESS: OTP token cleanup processed " + processedCount + " tokens");
     }
 
     @Test
@@ -301,7 +313,7 @@ public class DatabaseJobsIntegrationTest {
 
         // Individual cleanup jobs should also be logged
         List<String> expectedJobs = List.of(
-                "cleanup_password_reset_tokens",
+                "cleanup_otp_tokens",
                 "cleanup_account_status_audit",
                 "cleanup_unverified_accounts"
         );
@@ -329,7 +341,7 @@ public class DatabaseJobsIntegrationTest {
             Exception caughtException = null;
             try {
                 try (Connection conn = dataSource.getConnection();
-                     CallableStatement stmt = conn.prepareCall("SELECT cleanup_password_reset_tokens()")) {
+                     CallableStatement stmt = conn.prepareCall("SELECT cleanup_otp_tokens()")) {
                     stmt.execute();
                 }
             } catch (Exception e) {
@@ -342,7 +354,7 @@ public class DatabaseJobsIntegrationTest {
             } else {
                 // Check if failure was logged
                 Boolean failureLogged = jdbcTemplate.queryForObject(
-                        "SELECT EXISTS(SELECT 1 FROM job_execution_audit WHERE job_name = 'cleanup_password_reset_tokens' " +
+                        "SELECT EXISTS(SELECT 1 FROM job_execution_audit WHERE job_name = 'cleanup_otp_tokens' " +
                                 "AND execution_date = CURRENT_DATE AND success = false)",
                         Boolean.class);
                 assertThat(failureLogged).isTrue();
@@ -758,7 +770,7 @@ public class DatabaseJobsIntegrationTest {
         // Assert - Should have audit records for all cleanup jobs executed today
         List<String> expectedCleanupJobs = List.of(
                 "run_all_cleanup_jobs",
-                "cleanup_password_reset_tokens",
+                "cleanup_otp_tokens",
                 "cleanup_account_status_audit",
                 "cleanup_unverified_accounts"
         );
@@ -819,6 +831,78 @@ public class DatabaseJobsIntegrationTest {
         }
     }
 
+    // ===== OTP TOKEN SPECIFIC TESTS =====
+
+    @Test
+    void cleanupOtpTokens_WithMultiplePurposes_ShouldCleanupAllTypes() {
+        // Arrange - Create OTP tokens for different purposes
+        Long emailId = createCustomerEmail("multi@gmail.com", true);
+        Long phoneId = createCustomerPhone("+381987654321", true);
+
+        // Create old tokens of different purposes
+        createOtpToken(emailId, null, "111111", "EMAIL_VERIFICATION", "EMAIL", OffsetDateTime.now().minusDays(10));
+        createOtpToken(null, phoneId, "222222", "PHONE_VERIFICATION", "SMS", OffsetDateTime.now().minusDays(9));
+        createOtpToken(emailId, null, "333333", "PASSWORD_RESET", "EMAIL", OffsetDateTime.now().minusDays(8));
+
+        // Recent token that shouldn't be cleaned up
+        createOtpToken(emailId, null, "444444", "EMAIL_VERIFICATION", "EMAIL", OffsetDateTime.now().minusDays(2));
+
+        // Act
+        try (Connection conn = dataSource.getConnection();
+             CallableStatement stmt = conn.prepareCall("SELECT cleanup_otp_tokens()")) {
+            stmt.execute();
+        } catch (SQLException e) {
+            throw new RuntimeException("OTP cleanup failed", e);
+        }
+
+        // Assert - Should have cleaned up 3 old tokens
+        Integer processedCount = jdbcTemplate.queryForObject(
+                "SELECT records_processed FROM job_execution_audit WHERE job_name = 'cleanup_otp_tokens' " +
+                        "AND execution_date = CURRENT_DATE ORDER BY created_date DESC LIMIT 1",
+                Integer.class);
+
+        assertThat(processedCount).isEqualTo(3);
+
+        // Verify recent token still exists
+        Integer remainingTokens = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM otp_tokens", Integer.class);
+        assertThat(remainingTokens).isEqualTo(1);
+    }
+
+    @Test
+    void cleanupOtpTokens_WithUsedAndUnusedTokens_ShouldCleanupBothTypes() {
+        // Arrange - Create both used and unused old tokens
+        Long emailId = createCustomerEmail("used@gmail.com", true);
+
+        createOtpToken(emailId, null, "555555", "EMAIL_VERIFICATION", "EMAIL", OffsetDateTime.now().minusDays(10));
+        createOtpToken(emailId, null, "666666", "PASSWORD_RESET", "EMAIL", OffsetDateTime.now().minusDays(9));
+
+        // Mark one as used
+        jdbcTemplate.update("UPDATE otp_tokens SET used_at = ? WHERE otp_code = ?",
+                OffsetDateTime.now().minusDays(8), "555555");
+
+        // Act
+        try (Connection conn = dataSource.getConnection();
+             CallableStatement stmt = conn.prepareCall("SELECT cleanup_otp_tokens()")) {
+            stmt.execute();
+        } catch (SQLException e) {
+            throw new RuntimeException("OTP cleanup failed", e);
+        }
+
+        // Assert - Should have cleaned up both tokens
+        Integer processedCount = jdbcTemplate.queryForObject(
+                "SELECT records_processed FROM job_execution_audit WHERE job_name = 'cleanup_otp_tokens' " +
+                        "AND execution_date = CURRENT_DATE ORDER BY created_date DESC LIMIT 1",
+                Integer.class);
+
+        assertThat(processedCount).isEqualTo(2);
+
+        // Verify no tokens remain
+        Integer remainingTokens = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM otp_tokens", Integer.class);
+        assertThat(remainingTokens).isEqualTo(0);
+    }
+
     // ===== HELPER METHODS =====
 
     private void setupOldAccountsForTesting(int count) {
@@ -837,11 +921,16 @@ public class DatabaseJobsIntegrationTest {
     }
 
     private void setupTestDataForCleanupJobs() {
-        // Setup data for password reset token cleanup
+        // Setup data for OTP token cleanup
         Long emailId = createCustomerEmail("cleanup@gmail.com", true);
-        Long customerId = createCustomer("Cleanup", "Test", emailId, null);
+        Long phoneId = createCustomerPhone("+381123456789", true);
+        Long customerId = createCustomer("Cleanup", "Test", emailId, phoneId);
         Long accountId = createCustomerAccount(customerId, "cleanup@gmail.com");
-        createPasswordResetToken(accountId, "old-token", OffsetDateTime.now().minusDays(10));
+
+        // Create old OTP tokens of different types
+        createOtpToken(emailId, null, "123456", "PASSWORD_RESET", "EMAIL", OffsetDateTime.now().minusDays(10));
+        createOtpToken(emailId, null, "789012", "EMAIL_VERIFICATION", "EMAIL", OffsetDateTime.now().minusDays(9));
+        createOtpToken(null, phoneId, "345678", "PHONE_VERIFICATION", "SMS", OffsetDateTime.now().minusDays(8));
 
         // Setup data for account status audit cleanup
         createAccountStatusAuditRecord(accountId, "ACTIVE", "INACTIVE", OffsetDateTime.now().minusDays(400));
@@ -866,6 +955,13 @@ public class DatabaseJobsIntegrationTest {
     }
 
     @SuppressWarnings("SameParameterValue") // Test data consistency is intentional
+    private Long createCustomerPhone(String phone, boolean verified) {
+        return jdbcTemplate.queryForObject(
+                "INSERT INTO customer_phones (phone, is_verified) VALUES (?, ?) RETURNING id",
+                Long.class, phone, verified);
+    }
+
+    @SuppressWarnings("SameParameterValue") // Test data consistency is intentional
     private Long createCustomer(String firstName, String lastName, Long emailId, Long phoneId) {
         return jdbcTemplate.queryForObject(
                 "INSERT INTO customers (first_name, last_name, email_id, phone_id) VALUES (?, ?, ?, ?) RETURNING id",
@@ -886,33 +982,36 @@ public class DatabaseJobsIntegrationTest {
         return accountId;
     }
 
-    private Long createPasswordResetToken(Long accountId, String token, OffsetDateTime createdDate) {
+    private Long createOtpToken(Long emailId, Long phoneId, String otpCode, String purpose, String deliveryMethod, OffsetDateTime createdDate) {
+        // CRITICAL: Ensure OTP code is exactly 6 characters
+        if (otpCode == null || otpCode.length() != 6) {
+            throw new IllegalArgumentException("OTP code must be exactly 6 characters, got: " + (otpCode != null ? otpCode : "null"));
+        }
+
         Long tokenId = jdbcTemplate.queryForObject(
-                "INSERT INTO password_reset_tokens (customer_account_id, token, expires_at, used) " +
-                        "VALUES (?, ?, ?, false) RETURNING id",
-                Long.class, accountId, token, OffsetDateTime.now().plusHours(24));
+                "INSERT INTO otp_tokens (customer_email_id, customer_phone_id, otp_code, purpose, delivery_method, expires_at) " +
+                        "VALUES (?, ?, ?, ?::otp_purpose_enum, ?::otp_delivery_method_enum, ?) RETURNING id",
+                Long.class, emailId, phoneId, otpCode, purpose, deliveryMethod,
+                OffsetDateTime.now().plusMinutes(10)); // Default 10 minute expiry
+
         // Update created date manually
-        jdbcTemplate.update("UPDATE password_reset_tokens SET created_date = ? WHERE id = ?", createdDate, tokenId);
+        jdbcTemplate.update("UPDATE otp_tokens SET created_date = ? WHERE id = ?", createdDate, tokenId);
         return tokenId;
     }
 
     private void createAccountStatusAuditRecord(Long accountId, String oldStatus, String newStatus, OffsetDateTime createdDate) {
-        Long auditId = jdbcTemplate.queryForObject(
-                "INSERT INTO account_status_audit (account_id, old_status, new_status) " +
-                        "VALUES (?, ?::customer_account_activity_status_enum, ?::customer_account_activity_status_enum) RETURNING id",
-                Long.class, accountId, oldStatus, newStatus);
-        // Update created date manually
-        jdbcTemplate.update("UPDATE account_status_audit SET created_date = ? WHERE id = ?", createdDate, auditId);
+        jdbcTemplate.update(
+                "INSERT INTO account_status_audit (account_id, old_status, new_status, created_date) " +
+                        "VALUES (?, ?::customer_account_activity_status_enum, ?::customer_account_activity_status_enum, ?)",
+                accountId, oldStatus, newStatus, createdDate);
     }
 
     private void createJobExecutionAuditRecord(String jobName, LocalDate executionDate, boolean success, int recordsProcessed, String errorMessage) {
-        Long auditId = jdbcTemplate.queryForObject(
-                "INSERT INTO job_execution_audit (job_name, execution_date, success, records_processed, error_message) " +
-                        "VALUES (?, ?, ?, ?, ?) RETURNING id",
-                Long.class, jobName, executionDate, success, recordsProcessed, errorMessage);
-        // Update created date to match execution date
-        jdbcTemplate.update("UPDATE job_execution_audit SET created_date = ? WHERE id = ?",
-                executionDate.atStartOfDay().atOffset(OffsetDateTime.now().getOffset()), auditId);
+        jdbcTemplate.update(
+                "INSERT INTO job_execution_audit (job_name, execution_date, success, records_processed, error_message, created_date) " +
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                jobName, executionDate, success, recordsProcessed, errorMessage,
+                executionDate.atStartOfDay().atOffset(OffsetDateTime.now().getOffset()));
     }
 
     private void updateAccountLastLogin(Long accountId, OffsetDateTime lastLogin) {
