@@ -1,7 +1,7 @@
--- V209__create_password_reset_token_cleanup_function.sql
--- Password reset token cleanup function
+-- V209__create_otp_tokens_cleanup_function.sql
+-- OTP tokens cleanup function (replaces cleanup_password_reset_tokens)
 
-CREATE OR REPLACE FUNCTION cleanup_password_reset_tokens()
+CREATE OR REPLACE FUNCTION cleanup_otp_tokens()
     RETURNS VOID AS $$
 DECLARE
     cleanup_days INTEGER;
@@ -18,23 +18,23 @@ BEGIN
     BEGIN
         -- Get configuration
         SELECT value::INTEGER INTO cleanup_days
-        FROM business_config WHERE key = 'password_reset_token_cleanup_days';
+        FROM business_config WHERE key = 'otp_token_cleanup_days';
 
         SELECT value::INTEGER INTO batch_size
         FROM business_config WHERE key = 'cleanup_batch_size';
 
         IF cleanup_days IS NULL OR batch_size IS NULL THEN
-            RAISE EXCEPTION 'Missing cleanup configuration: password_reset_token_cleanup_days or cleanup_batch_size';
+            RAISE EXCEPTION 'Missing cleanup configuration: otp_token_cleanup_days or cleanup_batch_size';
         END IF;
 
-        RAISE NOTICE 'Starting password reset token cleanup: cleanup_days=%, batch_size=%',
+        RAISE NOTICE 'Starting OTP tokens cleanup: cleanup_days=%, batch_size=%',
             cleanup_days, batch_size;
 
-        -- Delete in batches to avoid long locks
+        -- Delete expired and used OTP tokens in batches
         LOOP
-            DELETE FROM password_reset_tokens
+            DELETE FROM otp_tokens
             WHERE id IN (
-                SELECT id FROM password_reset_tokens
+                SELECT id FROM otp_tokens
                 WHERE created_date < CURRENT_TIMESTAMP - (cleanup_days || ' days')::INTERVAL
                 LIMIT batch_size
             );
@@ -44,7 +44,7 @@ BEGIN
 
             EXIT WHEN current_batch_deleted = 0;
 
-            RAISE NOTICE 'Deleted % password reset tokens (total: %)',
+            RAISE NOTICE 'Deleted % OTP tokens (total: %)',
                 current_batch_deleted, total_deleted;
         END LOOP;
 
@@ -55,10 +55,10 @@ BEGIN
         INSERT INTO job_execution_audit (
             job_name, execution_date, success, records_processed, execution_time_ms
         ) VALUES (
-                     'cleanup_password_reset_tokens', CURRENT_DATE, TRUE, total_deleted, execution_time_ms
+                     'cleanup_otp_tokens', CURRENT_DATE, TRUE, total_deleted, execution_time_ms
                  );
 
-        RAISE NOTICE 'Password reset token cleanup completed: % tokens deleted in %.3f seconds',
+        RAISE NOTICE 'OTP tokens cleanup completed: % tokens deleted in %.3f seconds',
             total_deleted, execution_time_ms / 1000.0;
 
     EXCEPTION WHEN OTHERS THEN
@@ -69,10 +69,10 @@ BEGIN
         INSERT INTO job_execution_audit (
             job_name, execution_date, success, records_processed, error_message, execution_time_ms
         ) VALUES (
-                     'cleanup_password_reset_tokens', CURRENT_DATE, FALSE, total_deleted, error_message, execution_time_ms
+                     'cleanup_otp_tokens', CURRENT_DATE, FALSE, total_deleted, error_message, execution_time_ms
                  );
 
-        RAISE NOTICE 'Password reset token cleanup failed: % (processed % tokens before failure)',
+        RAISE NOTICE 'OTP tokens cleanup failed: % (processed % tokens before failure)',
             error_message, total_deleted;
         RAISE;
     END;

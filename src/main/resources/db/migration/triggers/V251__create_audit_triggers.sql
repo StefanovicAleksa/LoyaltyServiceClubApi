@@ -29,10 +29,10 @@ CREATE TRIGGER z_audit_customer_accounts
     FOR EACH ROW
 EXECUTE FUNCTION update_audit_fields();
 
--- Password reset tokens audit trigger
-CREATE TRIGGER z_audit_password_reset_tokens
+-- OTP tokens audit trigger
+CREATE TRIGGER z_audit_otp_tokens
     BEFORE INSERT OR UPDATE
-    ON password_reset_tokens
+    ON otp_tokens
     FOR EACH ROW
 EXECUTE FUNCTION update_audit_fields();
 

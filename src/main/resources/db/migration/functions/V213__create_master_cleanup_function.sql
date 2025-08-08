@@ -14,14 +14,14 @@ BEGIN
 
     RAISE NOTICE 'Starting all database cleanup jobs at %', start_time;
 
-    -- Run password reset token cleanup
+    -- Run OTP token cleanup (replaces password reset token cleanup)
     BEGIN
-        PERFORM cleanup_password_reset_tokens();
-        RAISE NOTICE '✅ Password reset token cleanup completed successfully';
+        PERFORM cleanup_otp_tokens();
+        RAISE NOTICE '✅ OTP token cleanup completed successfully';
     EXCEPTION WHEN OTHERS THEN
         total_errors := total_errors + 1;
         error_message := SQLERRM;
-        RAISE NOTICE '❌ Password reset token cleanup failed: %', error_message;
+        RAISE NOTICE '❌ OTP token cleanup failed: %', error_message;
     END;
 
     -- Run account status audit cleanup
