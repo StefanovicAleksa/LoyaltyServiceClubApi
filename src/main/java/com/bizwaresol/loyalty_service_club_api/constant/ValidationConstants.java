@@ -20,6 +20,10 @@ public final class ValidationConstants {
             "^[a-zA-Z\\s\\-']+$"
     );
 
+    // OTP validation constants
+    public static final int OTP_CODE_LENGTH = 6;
+    public static final Pattern OTP_CODE_PATTERN = Pattern.compile("^[0-9]{6}$");
+
     public static final int MIN_PASSWORD_LENGTH = 8;
     public static final int MAX_PASSWORD_LENGTH = 255;
 

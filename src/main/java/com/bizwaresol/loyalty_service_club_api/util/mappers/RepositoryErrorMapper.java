@@ -200,14 +200,14 @@ public final class RepositoryErrorMapper {
             return new DuplicateUsernameException(username != null ? username : "unknown", cause);
         }
 
-        // password_reset_tokens table: token VARCHAR(255) NOT NULL UNIQUE
-        if (lowerMessage.contains("password_reset_tokens") && lowerMessage.contains("token")) {
-            return new DatabaseSystemException("Duplicate password reset token", cause);
+        // otp_tokens table: check for any constraints (otp_code is not unique by design)
+        if (lowerMessage.contains("otp_tokens")) {
+            return new DatabaseSystemException("OTP token constraint violation: " + message, cause);
         }
 
         // Foreign key constraints
         if (lowerMessage.contains("fk_customer_email") || lowerMessage.contains("fk_customer_phone") ||
-                lowerMessage.contains("fk_customer_account_customer") || lowerMessage.contains("fk_password_reset_customer_account")) {
+                lowerMessage.contains("fk_customer_account_customer") || lowerMessage.contains("fk_otp_customer")) {
             return new DatabaseSystemException("Foreign key constraint violation", cause);
         }
 
@@ -239,8 +239,8 @@ public final class RepositoryErrorMapper {
         if (lowerMessage.contains("phone")) {
             return new PhoneNotFoundException(message);
         }
-        if (lowerMessage.contains("token") || lowerMessage.contains("password_reset")) {
-            return new PasswordResetTokenNotFoundException(message);
+        if (lowerMessage.contains("otp") || lowerMessage.contains("token")) {
+            return new OtpTokenNotFoundException(message);
         }
 
         return new CustomerNotFoundException("Entity not found: " + message);

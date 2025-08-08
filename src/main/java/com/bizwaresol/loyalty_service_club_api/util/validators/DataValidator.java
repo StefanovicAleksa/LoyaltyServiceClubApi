@@ -69,6 +69,13 @@ public final class DataValidator {
         }
     }
 
+    // OTP validation
+    public static void checkOtpPattern(String otpCode) {
+        if (!ValidationConstants.OTP_CODE_PATTERN.matcher(otpCode.trim()).matches()) {
+            throw new InvalidOtpFormatException(otpCode);
+        }
+    }
+
     private static String extractDomain(String email) {
         int atIndex = email.lastIndexOf('@');
         if (atIndex > 0 && atIndex < email.length() - 1) {
@@ -120,5 +127,10 @@ public final class DataValidator {
 
     public static void validateUsername(String username, String fieldName) {
         checkField(username, fieldName, ValidationConstants.MIN_USERNAME_LENGTH, ValidationConstants.MAX_USERNAME_LENGTH);
+    }
+
+    public static void validateOtpCode(String otpCode, String fieldName) {
+        checkField(otpCode, fieldName, ValidationConstants.OTP_CODE_LENGTH, ValidationConstants.OTP_CODE_LENGTH);
+        checkOtpPattern(otpCode);
     }
 }
