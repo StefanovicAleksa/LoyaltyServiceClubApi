@@ -1,19 +1,27 @@
+// =====================================================================================
+// FILE: src/main/java/com/bizwaresol/loyalty_service_club_api/service/auth/AuthenticationService.java
+// =====================================================================================
 package com.bizwaresol.loyalty_service_club_api.service.auth;
 
 import com.bizwaresol.loyalty_service_club_api.data.dto.auth.request.LoginRequest;
 import com.bizwaresol.loyalty_service_club_api.data.dto.auth.request.RegistrationRequest;
 import com.bizwaresol.loyalty_service_club_api.data.dto.auth.result.LoginResult;
 import com.bizwaresol.loyalty_service_club_api.data.dto.auth.result.RegistrationResult;
-import com.bizwaresol.loyalty_service_club_api.exception.business.resource.CustomerAccountNotFoundException;
-import com.bizwaresol.loyalty_service_club_api.service.data.*;
 import com.bizwaresol.loyalty_service_club_api.domain.entity.*;
 import com.bizwaresol.loyalty_service_club_api.domain.enums.CustomerAccountActivityStatus;
-import com.bizwaresol.loyalty_service_club_api.domain.enums.CustomerAccountIdentifierType;
-import com.bizwaresol.loyalty_service_club_api.exception.security.auth.customer.login.*;
-import com.bizwaresol.loyalty_service_club_api.exception.security.auth.customer.registration.*;
-import com.bizwaresol.loyalty_service_club_api.util.validators.AuthValidator;
+import com.bizwaresol.loyalty_service_club_api.exception.business.resource.CustomerAccountNotFoundException;
+import com.bizwaresol.loyalty_service_club_api.exception.security.auth.customer.login.AccountSuspendedException;
+import com.bizwaresol.loyalty_service_club_api.exception.security.auth.customer.login.InvalidLoginCredentialsException;
+import com.bizwaresol.loyalty_service_club_api.exception.security.auth.customer.registration.ContactAlreadyRegisteredException;
+import com.bizwaresol.loyalty_service_club_api.exception.security.auth.customer.registration.MissingContactInformationException;
+import com.bizwaresol.loyalty_service_club_api.exception.security.auth.customer.registration.RegistrationFailedException;
+import com.bizwaresol.loyalty_service_club_api.exception.validation.ValidationException;
+import com.bizwaresol.loyalty_service_club_api.service.data.CustomerAccountService;
+import com.bizwaresol.loyalty_service_club_api.service.data.CustomerEmailService;
+import com.bizwaresol.loyalty_service_club_api.service.data.CustomerPhoneService;
+import com.bizwaresol.loyalty_service_club_api.service.data.CustomerService;
 import com.bizwaresol.loyalty_service_club_api.util.mappers.AuthErrorMapper;
-
+import com.bizwaresol.loyalty_service_club_api.util.validators.AuthValidator;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -50,11 +58,11 @@ public class AuthenticationService {
      */
     @Transactional
     public LoginResult authenticate(LoginRequest request) {
-        try {
-            // 1. Validate input
-            AuthValidator.validateLoginRequest(request);
+        // 1. Validate input first to fail fast
+        AuthValidator.validateLoginRequest(request);
 
-            // 2. Determine identifier type and find account
+        try {
+            // 2. Find account by identifier (which is the username field, populated by email/phone via trigger)
             CustomerAccount account = findAccountByIdentifier(request.identifier());
 
             // 3. Validate password
@@ -73,10 +81,11 @@ public class AuthenticationService {
 
             // 6. Return success result
             return LoginResult.success(account, request.rememberMe(), previousLoginAt);
-
-        } catch (InvalidLoginCredentialsException | AccountSuspendedException e) {
+        } catch (ValidationException | InvalidLoginCredentialsException | AccountSuspendedException e) {
+            // Re-throw expected business and validation exceptions directly
             throw e;
         } catch (Exception e) {
+            // Map only unexpected exceptions
             throw AuthErrorMapper.mapToLoginException(e, request.identifier());
         }
     }
@@ -93,10 +102,10 @@ public class AuthenticationService {
      */
     @Transactional
     public RegistrationResult register(RegistrationRequest request) {
-        try {
-            // 1. Validate input
-            AuthValidator.validateRegistrationRequest(request);
+        // 1. Validate input first to fail fast
+        AuthValidator.validateRegistrationRequest(request);
 
+        try {
             // 2. Create contact entities (bottom-up approach)
             CustomerEmail email = createEmailIfProvided(request.email());
             CustomerPhone phone = createPhoneIfProvided(request.phone());
@@ -120,10 +129,11 @@ public class AuthenticationService {
                     phone != null,
                     request.rememberMe()
             );
-
-        } catch (MissingContactInformationException | ContactAlreadyRegisteredException | RegistrationFailedException e) {
+        } catch (ValidationException | MissingContactInformationException | ContactAlreadyRegisteredException | RegistrationFailedException e) {
+            // Re-throw expected business and validation exceptions directly
             throw e;
         } catch (Exception e) {
+            // Map only unexpected exceptions
             throw AuthErrorMapper.mapToRegistrationException(e);
         }
     }
@@ -131,22 +141,15 @@ public class AuthenticationService {
     // ===== PRIVATE HELPER METHODS =====
 
     private CustomerAccount findAccountByIdentifier(String identifier) {
-        CustomerAccountIdentifierType type = CustomerAccountIdentifierType.fromIdentifier(identifier);
-
+        // Per architecture, the username field is the single source of truth for login.
+        // It is populated with email or phone by a database trigger.
         try {
             return customerAccountService.findByUsername(identifier.trim());
         } catch (CustomerAccountNotFoundException e) {
-            // Only try phone fallback for actual "not found" cases
-            if (type == CustomerAccountIdentifierType.PHONE) {
-                try {
-                    return customerAccountService.findByPhoneNumber(identifier.trim());
-                } catch (Exception phoneException) {
-                    throw new InvalidLoginCredentialsException(identifier);
-                }
-            }
+            // If the account is not found by the identifier (username), it's invalid credentials.
             throw new InvalidLoginCredentialsException(identifier);
         } catch (Exception e) {
-            // Let validation errors bubble up through AuthErrorMapper
+            // Let other exceptions (like validation) bubble up to be mapped
             throw AuthErrorMapper.mapToLoginException(e, identifier);
         }
     }
@@ -156,6 +159,7 @@ public class AuthenticationService {
             try {
                 return customerEmailService.createEmail(email);
             } catch (Exception e) {
+                // Let the mapper handle specific duplicate exceptions
                 throw AuthErrorMapper.mapToRegistrationException(e);
             }
         }
@@ -167,6 +171,7 @@ public class AuthenticationService {
             try {
                 return customerPhoneService.createPhone(phone);
             } catch (Exception e) {
+                // Let the mapper handle specific duplicate exceptions
                 throw AuthErrorMapper.mapToRegistrationException(e);
             }
         }
