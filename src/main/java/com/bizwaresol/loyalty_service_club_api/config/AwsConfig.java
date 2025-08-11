@@ -4,6 +4,7 @@ import com.bizwaresol.loyalty_service_club_api.config.properties.AwsProperties;
 import com.bizwaresol.loyalty_service_club_api.config.properties.SesProperties;
 import com.bizwaresol.loyalty_service_club_api.config.properties.SnsProperties;
 import com.bizwaresol.loyalty_service_club_api.config.properties.VerificationProperties;
+import com.bizwaresol.loyalty_service_club_api.config.properties.VerificationTemplateProperties;
 
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -20,7 +21,8 @@ import software.amazon.awssdk.services.sns.SnsClient;
         AwsProperties.class,
         SnsProperties.class,
         SesProperties.class,
-        VerificationProperties.class
+        VerificationProperties.class,
+        VerificationTemplateProperties.class
 })
 public class AwsConfig {
 

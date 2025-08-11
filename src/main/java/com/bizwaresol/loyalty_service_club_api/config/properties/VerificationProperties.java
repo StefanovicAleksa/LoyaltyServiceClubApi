@@ -11,10 +11,10 @@ public class VerificationProperties {
     private int otpExpiryMinutes;
     private int maxAttempts;
     private int otpLength;
-    private int resendCooldownMinutes;
+    private int resendCooldownSeconds;
 
-    // Rate limiting properties
-    private int[] otpRateLimitWaitMinutes = RateLimitConstants.DEFAULT_OTP_RATE_LIMIT_WAIT_MINUTES;
+    // Rate limiting properties for RESEND attempts - controls OTP code requests, not verification attempts
+    private int[] otpRateLimitWaitSeconds = RateLimitConstants.DEFAULT_OTP_RATE_LIMIT_WAIT_SECONDS;
     private int otpRateLimitResetHours = RateLimitConstants.DEFAULT_OTP_RATE_LIMIT_RESET_HOURS;
 
     public boolean isSandboxMode() {
@@ -49,20 +49,20 @@ public class VerificationProperties {
         this.otpLength = otpLength;
     }
 
-    public int getResendCooldownMinutes() {
-        return resendCooldownMinutes;
+    public int getResendCooldownSeconds() {
+        return resendCooldownSeconds;
     }
 
-    public void setResendCooldownMinutes(int resendCooldownMinutes) {
-        this.resendCooldownMinutes = resendCooldownMinutes;
+    public void setResendCooldownSeconds(int resendCooldownSeconds) {
+        this.resendCooldownSeconds = resendCooldownSeconds;
     }
 
-    public int[] getOtpRateLimitWaitMinutes() {
-        return otpRateLimitWaitMinutes;
+    public int[] getOtpRateLimitWaitSeconds() {
+        return otpRateLimitWaitSeconds;
     }
 
-    public void setOtpRateLimitWaitMinutes(int[] otpRateLimitWaitMinutes) {
-        this.otpRateLimitWaitMinutes = otpRateLimitWaitMinutes;
+    public void setOtpRateLimitWaitSeconds(int[] otpRateLimitWaitSeconds) {
+        this.otpRateLimitWaitSeconds = otpRateLimitWaitSeconds;
     }
 
     public int getOtpRateLimitResetHours() {
@@ -74,19 +74,20 @@ public class VerificationProperties {
     }
 
     /**
-     * Get wait time in minutes for a specific attempt number
-     * @param attemptNumber the attempt number (1-based)
-     * @return wait time in minutes
+     * Get wait time in seconds for a specific RESEND attempt number
+     * This controls how long users must wait before requesting another OTP code
+     * @param attemptNumber the resend attempt number (1-based)
+     * @return wait time in seconds before next OTP can be requested
      */
     public int getWaitTimeForAttempt(int attemptNumber) {
         if (attemptNumber <= 1) return 0;
 
         int index = attemptNumber - 2; // Convert to 0-based index for wait times
-        if (index >= otpRateLimitWaitMinutes.length) {
+        if (index >= otpRateLimitWaitSeconds.length) {
             // Use last (highest) wait time for attempts beyond configured range
-            return otpRateLimitWaitMinutes[otpRateLimitWaitMinutes.length - 1];
+            return otpRateLimitWaitSeconds[otpRateLimitWaitSeconds.length - 1];
         }
-        return otpRateLimitWaitMinutes[index];
+        return otpRateLimitWaitSeconds[index];
     }
 
     @Override
@@ -96,8 +97,8 @@ public class VerificationProperties {
                 ", otpExpiryMinutes=" + otpExpiryMinutes +
                 ", maxAttempts=" + maxAttempts +
                 ", otpLength=" + otpLength +
-                ", resendCooldownMinutes=" + resendCooldownMinutes +
-                ", otpRateLimitWaitMinutes=" + java.util.Arrays.toString(otpRateLimitWaitMinutes) +
+                ", resendCooldownSeconds=" + resendCooldownSeconds +
+                ", otpRateLimitWaitSeconds=" + java.util.Arrays.toString(otpRateLimitWaitSeconds) +
                 ", otpRateLimitResetHours=" + otpRateLimitResetHours +
                 '}';
     }

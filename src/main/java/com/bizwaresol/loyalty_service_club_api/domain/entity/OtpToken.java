@@ -8,6 +8,7 @@ import org.hibernate.type.SqlTypes;
 
 import java.time.OffsetDateTime;
 import java.util.Objects;
+import java.util.concurrent.ThreadLocalRandom;
 
 @Entity
 @Table(name = "otp_tokens")
@@ -259,5 +260,13 @@ public class OtpToken {
                 ", maxAttempts=" + maxAttempts +
                 ", contactIdentifier='" + getContactIdentifier() + "'" +
                 '}';
+    }
+
+    /**
+     * Generates a random 6-digit OTP code
+     * @return a 6-digit numeric string (e.g., "123456", "000789")
+     */
+    public static String generateOtpCode() {
+        return String.format("%06d", ThreadLocalRandom.current().nextInt(0, 1000000));
     }
 }
