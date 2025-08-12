@@ -36,7 +36,7 @@ public class DatabaseTriggersIntegrationTest {
     @BeforeEach
     void cleanupDatabase() {
         // Clean all tables except business_config
-        jdbcTemplate.execute("TRUNCATE TABLE password_reset_tokens CASCADE"); // ADDED
+        jdbcTemplate.execute("TRUNCATE TABLE password_reset_tokens CASCADE");
         jdbcTemplate.execute("TRUNCATE TABLE otp_tokens CASCADE");
         jdbcTemplate.execute("TRUNCATE TABLE customer_accounts CASCADE");
         jdbcTemplate.execute("TRUNCATE TABLE customers CASCADE");
@@ -51,7 +51,7 @@ public class DatabaseTriggersIntegrationTest {
         jdbcTemplate.execute("ALTER SEQUENCE customers_id_seq RESTART WITH 1");
         jdbcTemplate.execute("ALTER SEQUENCE customer_accounts_id_seq RESTART WITH 1");
         jdbcTemplate.execute("ALTER SEQUENCE otp_tokens_id_seq RESTART WITH 1");
-        jdbcTemplate.execute("ALTER SEQUENCE password_reset_tokens_id_seq RESTART WITH 1"); // ADDED
+        jdbcTemplate.execute("ALTER SEQUENCE password_reset_tokens_id_seq RESTART WITH 1");
         jdbcTemplate.execute("ALTER SEQUENCE account_status_audit_id_seq RESTART WITH 1");
         jdbcTemplate.execute("ALTER SEQUENCE job_execution_audit_id_seq RESTART WITH 1");
     }
@@ -491,6 +491,97 @@ public class DatabaseTriggersIntegrationTest {
         }
     }
 
+    // ===== OTP VERIFICATION TRIGGER TESTS (NEWLY ADDED) =====
+
+    @Test
+    void otpVerificationTrigger_WhenEmailOtpIsUsed_ShouldVerifyEmailAndAccount() {
+        // Arrange
+        Long emailId = createCustomerEmail("otp-verify-email@gmail.com", false);
+        Long customerId = createCustomer("Otp", "Verify", emailId, null);
+        Long accountId = createCustomerAccount(customerId, "otp-verify-email@gmail.com");
+        Long otpTokenId = createOTPToken(emailId, null, "111222", "EMAIL_VERIFICATION", "EMAIL");
+
+        // Act: Mark the OTP as used, which should fire the new trigger
+        markOTPTokenAsUsed(otpTokenId);
+
+        // Assert: Check that the email is now verified
+        Boolean emailVerified = jdbcTemplate.queryForObject(
+                "SELECT is_verified FROM customer_emails WHERE id = ?", Boolean.class, emailId);
+        assertThat(emailVerified).isTrue();
+
+        // Assert: Check that the account status is now EMAIL_VERIFIED due to the trigger chain
+        String accountStatus = jdbcTemplate.queryForObject(
+                "SELECT verification_status FROM customer_accounts WHERE id = ?", String.class, accountId);
+        assertThat(accountStatus).isEqualTo("EMAIL_VERIFIED");
+    }
+
+    @Test
+    void otpVerificationTrigger_WhenPhoneOtpIsUsed_ShouldVerifyPhoneAndAccount() {
+        // Arrange
+        Long phoneId = createCustomerPhone("+381699999999", false);
+        Long customerId = createCustomer("Otp", "Verify", null, phoneId);
+        Long accountId = createCustomerAccount(customerId, "+381699999999");
+        Long otpTokenId = createOTPToken(null, phoneId, "333444", "PHONE_VERIFICATION", "SMS");
+
+        // Act: Mark the OTP as used
+        markOTPTokenAsUsed(otpTokenId);
+
+        // Assert: Check that the phone is now verified
+        Boolean phoneVerified = jdbcTemplate.queryForObject(
+                "SELECT is_verified FROM customer_phones WHERE id = ?", Boolean.class, phoneId);
+        assertThat(phoneVerified).isTrue();
+
+        // Assert: Check that the account status is now PHONE_VERIFIED
+        String accountStatus = jdbcTemplate.queryForObject(
+                "SELECT verification_status FROM customer_accounts WHERE id = ?", String.class, accountId);
+        assertThat(accountStatus).isEqualTo("PHONE_VERIFIED");
+    }
+
+    @Test
+    void otpVerificationTrigger_WhenPasswordResetOtpIsUsed_ShouldNotChangeVerificationStatus() {
+        // Arrange
+        Long emailId = createCustomerEmail("otp-password@gmail.com", false);
+        Long customerId = createCustomer("Otp", "Password", emailId, null);
+        Long accountId = createCustomerAccount(customerId, "otp-password@gmail.com");
+        Long otpTokenId = createOTPToken(emailId, null, "555666", "PASSWORD_RESET", "EMAIL");
+
+        // Act: Mark the password reset OTP as used
+        markOTPTokenAsUsed(otpTokenId);
+
+        // Assert: The email should NOT be verified
+        Boolean emailVerified = jdbcTemplate.queryForObject(
+                "SELECT is_verified FROM customer_emails WHERE id = ?", Boolean.class, emailId);
+        assertThat(emailVerified).isFalse();
+
+        // Assert: The account status should remain UNVERIFIED
+        String accountStatus = jdbcTemplate.queryForObject(
+                "SELECT verification_status FROM customer_accounts WHERE id = ?", String.class, accountId);
+        assertThat(accountStatus).isEqualTo("UNVERIFIED");
+    }
+
+    @Test
+    void otpVerificationTrigger_WhenContactIsAlreadyVerified_ShouldNotChangeStatus() {
+        // Arrange: Email is already verified, and account status reflects this
+        Long emailId = createCustomerEmail("otp-already-verified@gmail.com", true);
+        Long customerId = createCustomer("Otp", "Verified", emailId, null);
+        Long accountId = createCustomerAccount(customerId, "otp-already-verified@gmail.com");
+        jdbcTemplate.update("UPDATE customer_accounts SET verification_status = 'EMAIL_VERIFIED' WHERE id = ?", accountId);
+        Long otpTokenId = createOTPToken(emailId, null, "777888", "EMAIL_VERIFICATION", "EMAIL");
+
+        // Act: Use another verification token
+        markOTPTokenAsUsed(otpTokenId);
+
+        // Assert: The email is still verified
+        Boolean emailVerified = jdbcTemplate.queryForObject(
+                "SELECT is_verified FROM customer_emails WHERE id = ?", Boolean.class, emailId);
+        assertThat(emailVerified).isTrue();
+
+        // Assert: The account status remains EMAIL_VERIFIED without error
+        String accountStatus = jdbcTemplate.queryForObject(
+                "SELECT verification_status FROM customer_accounts WHERE id = ?", String.class, accountId);
+        assertThat(accountStatus).isEqualTo("EMAIL_VERIFIED");
+    }
+
     // ===== HELPER METHODS =====
 
     private Long createCustomerEmail(String email, boolean verified) {
@@ -524,6 +615,12 @@ public class DatabaseTriggersIntegrationTest {
                         "VALUES (?, ?, ?, ?::otp_purpose_enum, ?::otp_delivery_method_enum, ?) RETURNING id",
                 Long.class, customerEmailId, customerPhoneId, otpCode, purpose, deliveryMethod,
                 OffsetDateTime.now().plusMinutes(10)); // 10 minute expiry
+    }
+
+    private void markOTPTokenAsUsed(Long tokenId) {
+        jdbcTemplate.update(
+                "UPDATE otp_tokens SET used_at = CURRENT_TIMESTAMP WHERE id = ?",
+                tokenId);
     }
 
     private void assertAuditFieldsExist(String tableName, Long recordId) throws SQLException {

@@ -788,6 +788,28 @@ public class DatabaseFunctionsIntegrationTest {
         assertThat(processedCount).isEqualTo(1);
     }
 
+    // ===== HELPER METHOD SIDE-EFFECT TESTS (NEWLY ADDED) =====
+
+    @Test
+    void helper_markOTPTokenAsUsed_WithVerificationPurpose_ShouldTriggerVerificationChain() {
+        // This test confirms that the helper method, when used with a verification OTP,
+        // correctly fires the trigger chain that updates the account's verification status.
+
+        // Arrange
+        Long emailId = createCustomerEmail("helper-trigger@gmail.com", false);
+        Long customerId = createCustomer("Helper", "Trigger", emailId, null);
+        Long accountId = createCustomerAccount(customerId, "helper-trigger@gmail.com");
+        Long otpTokenId = createOTPToken(emailId, null, "888999", "EMAIL_VERIFICATION", "EMAIL");
+
+        // Act: Use the helper method from this test class
+        markOTPTokenAsUsed(otpTokenId);
+
+        // Assert: The full trigger chain should have completed
+        String accountStatus = jdbcTemplate.queryForObject(
+                "SELECT verification_status FROM customer_accounts WHERE id = ?", String.class, accountId);
+        assertThat(accountStatus).isEqualTo("EMAIL_VERIFIED");
+    }
+
     // ===== HELPER METHODS =====
 
     private Long createCustomerEmail(String email, boolean verified) {
@@ -811,8 +833,8 @@ public class DatabaseFunctionsIntegrationTest {
     private Long createCustomerAccount(Long customerId, String username) {
         return jdbcTemplate.queryForObject(
                 "INSERT INTO customer_accounts (customer_id, username, password, activity_status, verification_status) " +
-                        "VALUES (?, ?, ?, ?::customer_account_activity_status_enum, ?::customer_account_verification_status_enum) RETURNING id",
-                Long.class, customerId, username, "hashedPassword123", "ACTIVE", "UNVERIFIED");
+                        "VALUES (?, ?, 'hashedPassword123', 'ACTIVE'::customer_account_activity_status_enum, 'UNVERIFIED'::customer_account_verification_status_enum) RETURNING id",
+                Long.class, customerId, username);
     }
 
     private Long createCustomerAccountWithDate(Long customerId, String username, OffsetDateTime createdDate) {

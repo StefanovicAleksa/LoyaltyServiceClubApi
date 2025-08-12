@@ -399,12 +399,10 @@ class PhoneVerificationServiceTest {
         }
 
         @Test
-        @DisplayName("Should verify code successfully and mark phone as verified")
-        void shouldVerifyCodeSuccessfullyAndMarkPhoneAsVerified() {
+        @DisplayName("Should verify code successfully")
+        void shouldVerifyCodeSuccessfully() {
             when(otpTokenService.findValidPhoneVerificationOtp(VALID_OTP_CODE, VALID_PHONE))
                     .thenReturn(sampleOtpToken);
-            when(customerPhoneService.changeVerificationStatus(PHONE_ID, true))
-                    .thenReturn(sampleCustomerPhone);
 
             VerifyCodeResponse result = phoneVerificationService.verifyCode(VALID_PHONE, VALID_OTP_CODE);
 
@@ -413,7 +411,7 @@ class PhoneVerificationServiceTest {
             assertThat(result.contactVerified()).isTrue();
 
             verify(otpTokenService).markOtpAsUsed(OTP_ID);
-            verify(customerPhoneService).changeVerificationStatus(PHONE_ID, true);
+            verify(customerPhoneService, never()).changeVerificationStatus(anyLong(), anyBoolean());
         }
 
         @Test
@@ -422,8 +420,6 @@ class PhoneVerificationServiceTest {
             String paddedOtpCode = "  " + VALID_OTP_CODE + "  ";
             when(otpTokenService.findValidPhoneVerificationOtp(VALID_OTP_CODE, VALID_PHONE))
                     .thenReturn(sampleOtpToken);
-            when(customerPhoneService.changeVerificationStatus(PHONE_ID, true))
-                    .thenReturn(sampleCustomerPhone);
 
             VerifyCodeResponse result = phoneVerificationService.verifyCode(VALID_PHONE, paddedOtpCode);
 

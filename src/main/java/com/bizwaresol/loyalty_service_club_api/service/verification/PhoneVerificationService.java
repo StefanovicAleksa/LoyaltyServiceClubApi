@@ -131,14 +131,11 @@ public class PhoneVerificationService {
                 return VerifyCodeResponse.invalidCode(phone, OtpDeliveryMethod.SMS, remainingAttempts, maxReached);
             }
 
-            // 7. Mark OTP as used
+            // 7. Mark OTP as used. This will now trigger the database function
+            // to update the phone's verification status automatically.
             otpTokenService.markOtpAsUsed(otpToken.getId());
 
-            // 8. Mark phone as verified
-            CustomerPhone customerPhone = otpToken.getCustomerPhone();
-            customerPhoneService.changeVerificationStatus(customerPhone.getId(), true);
-
-            // 9. Return success response
+            // 8. Return success response
             return VerifyCodeResponse.success(phone, OtpDeliveryMethod.SMS);
 
         } catch (ValidationException | OtpVerificationException e) {

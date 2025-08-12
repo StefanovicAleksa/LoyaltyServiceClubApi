@@ -135,14 +135,11 @@ public class EmailVerificationService {
                 return VerifyCodeResponse.invalidCode(email, OtpDeliveryMethod.EMAIL, remainingAttempts, maxReached);
             }
 
-            // 7. Mark OTP as used
+            // 7. Mark OTP as used. This will now trigger the database function
+            // to update the email's verification status automatically.
             otpTokenService.markOtpAsUsed(otpToken.getId());
 
-            // 8. Mark email as verified
-            CustomerEmail customerEmail = otpToken.getCustomerEmail();
-            customerEmailService.changeVerificationStatus(customerEmail.getId(), true);
-
-            // 9. Return success response
+            // 8. Return success response
             return VerifyCodeResponse.success(email, OtpDeliveryMethod.EMAIL);
 
         } catch (ValidationException | OtpVerificationException e) {

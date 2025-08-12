@@ -348,12 +348,10 @@ class EmailVerificationServiceTest {
         }
 
         @Test
-        @DisplayName("Should verify code successfully and mark email as verified")
-        void shouldVerifyCodeSuccessfullyAndMarkEmailAsVerified() {
+        @DisplayName("Should verify code successfully")
+        void shouldVerifyCodeSuccessfully() {
             when(otpTokenService.findValidEmailVerificationOtp(VALID_OTP_CODE, VALID_EMAIL))
                     .thenReturn(sampleOtpToken);
-            when(customerEmailService.changeVerificationStatus(EMAIL_ID, true))
-                    .thenReturn(sampleCustomerEmail);
 
             VerifyCodeResponse result = emailVerificationService.verifyCode(VALID_EMAIL, VALID_OTP_CODE);
 
@@ -362,7 +360,7 @@ class EmailVerificationServiceTest {
             assertThat(result.contactVerified()).isTrue();
 
             verify(otpTokenService).markOtpAsUsed(OTP_ID);
-            verify(customerEmailService).changeVerificationStatus(EMAIL_ID, true);
+            verify(customerEmailService, never()).changeVerificationStatus(anyLong(), anyBoolean());
         }
 
         @Test
@@ -371,8 +369,6 @@ class EmailVerificationServiceTest {
             String paddedOtpCode = "  " + VALID_OTP_CODE + "  ";
             when(otpTokenService.findValidEmailVerificationOtp(VALID_OTP_CODE, VALID_EMAIL))
                     .thenReturn(sampleOtpToken);
-            when(customerEmailService.changeVerificationStatus(EMAIL_ID, true))
-                    .thenReturn(sampleCustomerEmail);
 
             VerifyCodeResponse result = emailVerificationService.verifyCode(VALID_EMAIL, paddedOtpCode);
 
