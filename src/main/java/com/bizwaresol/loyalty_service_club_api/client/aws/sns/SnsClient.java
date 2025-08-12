@@ -2,13 +2,11 @@ package com.bizwaresol.loyalty_service_club_api.client.aws.sns;
 
 import com.bizwaresol.loyalty_service_club_api.client.aws.sns.dto.request.SnsMessageRequest;
 import com.bizwaresol.loyalty_service_club_api.client.aws.sns.dto.response.SnsMessageResponse;
-import org.springframework.stereotype.Component;
 import software.amazon.awssdk.services.sns.model.*;
 
 import java.util.HashMap;
 import java.util.Map;
 
-@Component
 public class SnsClient {
 
     private final software.amazon.awssdk.services.sns.SnsClient awsSnsClient;

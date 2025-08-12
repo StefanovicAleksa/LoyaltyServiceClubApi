@@ -2,10 +2,8 @@ package com.bizwaresol.loyalty_service_club_api.client.aws.ses;
 
 import com.bizwaresol.loyalty_service_club_api.client.aws.ses.dto.request.SesEmailRequest;
 import com.bizwaresol.loyalty_service_club_api.client.aws.ses.dto.response.SesEmailResponse;
-import org.springframework.stereotype.Component;
 import software.amazon.awssdk.services.ses.model.*;
 
-@Component
 public class SesClient {
 
     private final software.amazon.awssdk.services.ses.SesClient awsSesClient;
