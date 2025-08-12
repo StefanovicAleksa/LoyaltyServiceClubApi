@@ -36,7 +36,8 @@ public class DatabaseTriggersIntegrationTest {
     @BeforeEach
     void cleanupDatabase() {
         // Clean all tables except business_config
-        jdbcTemplate.execute("TRUNCATE TABLE otp_tokens CASCADE");  // Changed from password_reset_tokens
+        jdbcTemplate.execute("TRUNCATE TABLE password_reset_tokens CASCADE"); // ADDED
+        jdbcTemplate.execute("TRUNCATE TABLE otp_tokens CASCADE");
         jdbcTemplate.execute("TRUNCATE TABLE customer_accounts CASCADE");
         jdbcTemplate.execute("TRUNCATE TABLE customers CASCADE");
         jdbcTemplate.execute("TRUNCATE TABLE customer_emails CASCADE");
@@ -49,7 +50,8 @@ public class DatabaseTriggersIntegrationTest {
         jdbcTemplate.execute("ALTER SEQUENCE customer_phones_id_seq RESTART WITH 1");
         jdbcTemplate.execute("ALTER SEQUENCE customers_id_seq RESTART WITH 1");
         jdbcTemplate.execute("ALTER SEQUENCE customer_accounts_id_seq RESTART WITH 1");
-        jdbcTemplate.execute("ALTER SEQUENCE otp_tokens_id_seq RESTART WITH 1");  // Changed from password_reset_tokens_id_seq
+        jdbcTemplate.execute("ALTER SEQUENCE otp_tokens_id_seq RESTART WITH 1");
+        jdbcTemplate.execute("ALTER SEQUENCE password_reset_tokens_id_seq RESTART WITH 1"); // ADDED
         jdbcTemplate.execute("ALTER SEQUENCE account_status_audit_id_seq RESTART WITH 1");
         jdbcTemplate.execute("ALTER SEQUENCE job_execution_audit_id_seq RESTART WITH 1");
     }
@@ -133,9 +135,13 @@ public class DatabaseTriggersIntegrationTest {
         Long accountId = createCustomerAccount(customerId, "test@gmail.com");
         assertAuditFieldsExist("customer_accounts", accountId);
 
-        // OTP tokens (changed from password reset tokens)
+        // OTP tokens
         Long otpTokenId = createOTPToken(emailId, null, "123456", "PASSWORD_RESET", "EMAIL");
         assertAuditFieldsExist("otp_tokens", otpTokenId);
+
+        // Password reset tokens (NEWLY ADDED)
+        Long passwordResetTokenId = createPasswordResetToken(accountId, "a-valid-uuid");
+        assertAuditFieldsExist("password_reset_tokens", passwordResetTokenId);
     }
 
     // ===== USERNAME SETTING TRIGGER TESTS =====
@@ -532,5 +538,12 @@ public class DatabaseTriggersIntegrationTest {
             assertThat(rs.getTimestamp("created_date")).isNotNull();
             assertThat(rs.getTimestamp("last_modified_date")).isNotNull();
         }
+    }
+
+    private Long createPasswordResetToken(Long accountId, String token) {
+        return jdbcTemplate.queryForObject(
+                "INSERT INTO password_reset_tokens (customer_account_id, token, expires_at) " +
+                        "VALUES (?, ?, ?) RETURNING id",
+                Long.class, accountId, token, OffsetDateTime.now().plusMinutes(10));
     }
 }
