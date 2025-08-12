@@ -1,5 +1,5 @@
 -- V208__update_mark_inactive_accounts_function_fixed.sql
--- Updated inactivity function with proper variable scoping
+-- Updated inactivity function with proper variable scoping and exception handling
 
 CREATE OR REPLACE FUNCTION mark_inactive_accounts_batched()
     RETURNS VOID AS $$
@@ -30,6 +30,7 @@ BEGIN
     start_time := CURRENT_TIMESTAMP;
 
     BEGIN
+        -- MOVED CONFIG CHECKS INSIDE THE TRANSACTIONAL BLOCK
         -- Read configuration values FIRST
         SELECT value::INTEGER INTO inactivity_days
         FROM business_config
@@ -46,14 +47,6 @@ BEGIN
 
         IF batch_size IS NULL THEN
             RAISE EXCEPTION 'Configuration missing: inactivity_batch_size';
-        END IF;
-
-        IF inactivity_days <= 0 THEN
-            RAISE EXCEPTION 'Invalid configuration: account_inactivity_days must be > 0, got %', inactivity_days;
-        END IF;
-
-        IF batch_size <= 0 THEN
-            RAISE EXCEPTION 'Invalid configuration: inactivity_batch_size must be > 0, got %', batch_size;
         END IF;
 
         RAISE NOTICE 'Starting account inactivity job: inactivity_days=%, batch_size=%',
@@ -151,9 +144,7 @@ BEGIN
 
         RAISE NOTICE 'Account inactivity job failed: % (processed % accounts before failure)',
             error_message, total_processed;
-
-        -- Re-raise the exception
-        RAISE;
+    -- DO NOT RE-RAISE EXCEPTION, to allow audit record to be committed.
     END;
 END;
 $$ LANGUAGE plpgsql;

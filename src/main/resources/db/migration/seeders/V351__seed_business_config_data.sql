@@ -23,4 +23,7 @@ VALUES
 ('otp_expiry_minutes', '10', 'Minutes until OTP tokens expire'),
 ('otp_max_attempts', '3', 'Maximum verification attempts per OTP'),
 ('otp_resend_cooldown_minutes', '1', 'Minutes to wait before allowing OTP resend'),
-('otp_rate_limit_per_hour', '10', 'Maximum OTPs that can be sent per contact per hour');
+('otp_rate_limit_per_hour', '10', 'Maximum OTPs that can be sent per contact per hour'),
+
+-- NEW: Password Reset Token cleanup configuration
+('password_reset_token_cleanup_days', '1', 'Days to keep used or expired password reset tokens before deletion');
