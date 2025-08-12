@@ -24,6 +24,11 @@ public final class ValidationConstants {
     public static final int OTP_CODE_LENGTH = 6;
     public static final Pattern OTP_CODE_PATTERN = Pattern.compile("^[0-9]{6}$");
 
+    // UUID validation for tokens
+    public static final Pattern UUID_PATTERN = Pattern.compile(
+            "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    );
+
     public static final int MIN_PASSWORD_LENGTH = 8;
     public static final int MAX_PASSWORD_LENGTH = 255;
 

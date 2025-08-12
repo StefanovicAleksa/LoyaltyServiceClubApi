@@ -184,13 +184,13 @@ public final class RepositoryErrorMapper {
 
         // customer_emails table: email VARCHAR(50) NOT NULL UNIQUE
         if (lowerMessage.contains("customer_emails") && lowerMessage.contains("email")) {
-            String email = extractEmailFromMessage(message);
+            String email = extractValueFromParentheses(message);
             return new DuplicateEmailException(email != null ? email : "unknown", cause);
         }
 
         // customer_phones table: phone VARCHAR(13) NOT NULL UNIQUE
         if (lowerMessage.contains("customer_phones") && lowerMessage.contains("phone")) {
-            String phone = extractPhoneFromMessage(message);
+            String phone = extractValueFromParentheses(message);
             return new DuplicatePhoneException(phone != null ? phone : "unknown", cause);
         }
 
@@ -198,6 +198,12 @@ public final class RepositoryErrorMapper {
         if (lowerMessage.contains("customer_accounts") && lowerMessage.contains("username")) {
             String username = extractUsernameFromMessage(message);
             return new DuplicateUsernameException(username != null ? username : "unknown", cause);
+        }
+
+        // NEW: password_reset_tokens table: uq_active_reset_token_per_user
+        if (lowerMessage.contains("uq_active_reset_token_per_user")) {
+            String accountId = extractValueFromParentheses(message);
+            return new DuplicateActivePasswordResetTokenException(accountId != null ? "account_id: " + accountId : "unknown account", cause);
         }
 
         // otp_tokens table: check for any constraints (otp_code is not unique by design)
@@ -227,6 +233,9 @@ public final class RepositoryErrorMapper {
         String lowerMessage = message.toLowerCase();
 
         // Map based on your actual entity types
+        if (lowerMessage.contains("passwordresettoken")) {
+            return new PasswordResetTokenNotFoundException(message);
+        }
         if (lowerMessage.contains("customer") && !lowerMessage.contains("account")) {
             return new CustomerNotFoundException(message);
         }
@@ -244,15 +253,6 @@ public final class RepositoryErrorMapper {
         }
 
         return new CustomerNotFoundException("Entity not found: " + message);
-    }
-
-    // Extract actual values from PostgreSQL error messages
-    private static String extractEmailFromMessage(String message) {
-        return extractValueFromParentheses(message);
-    }
-
-    private static String extractPhoneFromMessage(String message) {
-        return extractValueFromParentheses(message);
     }
 
     private static String extractUsernameFromMessage(String message) {

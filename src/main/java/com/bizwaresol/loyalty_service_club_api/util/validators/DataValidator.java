@@ -69,10 +69,15 @@ public final class DataValidator {
         }
     }
 
-    // OTP validation
     public static void checkOtpPattern(String otpCode) {
         if (!ValidationConstants.OTP_CODE_PATTERN.matcher(otpCode.trim()).matches()) {
             throw new InvalidOtpFormatException(otpCode);
+        }
+    }
+
+    public static void checkPasswordResetTokenPattern(String token) {
+        if (!ValidationConstants.UUID_PATTERN.matcher(token.trim()).matches()) {
+            throw new InvalidPasswordResetTokenFormatException();
         }
     }
 
@@ -132,5 +137,11 @@ public final class DataValidator {
     public static void validateOtpCode(String otpCode, String fieldName) {
         checkField(otpCode, fieldName, ValidationConstants.OTP_CODE_LENGTH, ValidationConstants.OTP_CODE_LENGTH);
         checkOtpPattern(otpCode);
+    }
+
+    public static void validatePasswordResetToken(String token, String fieldName) {
+        checkNotNull(token, fieldName);
+        checkNotEmptyString(token, fieldName);
+        checkPasswordResetTokenPattern(token);
     }
 }

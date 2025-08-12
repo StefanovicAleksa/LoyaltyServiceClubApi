@@ -1,5 +1,8 @@
 package com.bizwaresol.loyalty_service_club_api.exception.business.resource;
 
+/**
+ * Thrown when a specific PasswordResetToken cannot be found in the database.
+ */
 public class PasswordResetTokenNotFoundException extends ResourceNotFoundException {
 
     public PasswordResetTokenNotFoundException(Long tokenId) {
@@ -7,7 +10,7 @@ public class PasswordResetTokenNotFoundException extends ResourceNotFoundExcepti
     }
 
     public PasswordResetTokenNotFoundException(String token) {
-        super("Password reset token not found: " + token, "PASSWORD_RESET_TOKEN_NOT_FOUND");
+        super("Password reset token not found for the provided value.", "PASSWORD_RESET_TOKEN_NOT_FOUND");
     }
 
     public PasswordResetTokenNotFoundException(Long tokenId, Throwable cause) {
@@ -15,6 +18,6 @@ public class PasswordResetTokenNotFoundException extends ResourceNotFoundExcepti
     }
 
     public PasswordResetTokenNotFoundException(String token, Throwable cause) {
-        super("Password reset token not found: " + token, "PASSWORD_RESET_TOKEN_NOT_FOUND", cause);
+        super("Password reset token not found for the provided value.", "PASSWORD_RESET_TOKEN_NOT_FOUND", cause);
     }
 }
