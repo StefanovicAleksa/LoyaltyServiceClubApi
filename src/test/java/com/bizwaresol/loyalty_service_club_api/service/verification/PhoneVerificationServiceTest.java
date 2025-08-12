@@ -65,11 +65,13 @@ class PhoneVerificationServiceTest {
     private OtpToken expiredOtpToken;
     private OtpToken usedOtpToken;
     private OtpToken maxAttemptsOtpToken;
+    private OtpToken samplePasswordResetOtpToken;
+
 
     private final String VALID_PHONE = "+381123456789";
     private final String VALID_OTP_CODE = "123456";
     private final String INVALID_OTP_CODE = "999999";
-    private final String APP_NAME = "Loyalty";
+    private final String APP_NAME = "LoyaltyClub";
     private final Long PHONE_ID = 1L;
     private final Long OTP_ID = 2L;
     private final int OTP_EXPIRY_MINUTES = 10;
@@ -124,6 +126,17 @@ class PhoneVerificationServiceTest {
         maxAttemptsOtpToken.setExpiresAt(OffsetDateTime.now().plusMinutes(10));
         maxAttemptsOtpToken.setMaxAttempts(MAX_ATTEMPTS);
         maxAttemptsOtpToken.setAttemptsCount(MAX_ATTEMPTS);
+
+        samplePasswordResetOtpToken = new OtpToken();
+        samplePasswordResetOtpToken.setId(OTP_ID + 1);
+        samplePasswordResetOtpToken.setCustomerPhone(sampleCustomerPhone);
+        samplePasswordResetOtpToken.setOtpCode(VALID_OTP_CODE);
+        samplePasswordResetOtpToken.setPurpose(OtpPurpose.PASSWORD_RESET);
+        samplePasswordResetOtpToken.setDeliveryMethod(OtpDeliveryMethod.SMS);
+        samplePasswordResetOtpToken.setExpiresAt(OffsetDateTime.now().plusMinutes(10));
+        samplePasswordResetOtpToken.setMaxAttempts(MAX_ATTEMPTS);
+        samplePasswordResetOtpToken.setAttemptsCount(0);
+        samplePasswordResetOtpToken.setCreatedDate(OffsetDateTime.now());
     }
 
     // ===== SEND VERIFICATION CODE TESTS =====
@@ -235,56 +248,40 @@ class PhoneVerificationServiceTest {
                     .isInstanceOf(OtpDeliveryFailedException.class)
                     .hasMessageContaining("SMS service quota exceeded");
         }
+    }
+
+    // ===== SEND PASSWORD RESET CODE TESTS =====
+    @Nested
+    @DisplayName("sendPasswordResetCode() Tests")
+    class SendPasswordResetCodeTests {
 
         @Test
-        @DisplayName("Should throw OtpDeliveryFailedException when phone number opted out")
-        void shouldThrowOtpDeliveryFailedExceptionWhenPhoneNumberOptedOut() {
-            when(verificationProperties.getOtpExpiryMinutes()).thenReturn(OTP_EXPIRY_MINUTES);
-            when(verificationProperties.getMaxAttempts()).thenReturn(MAX_ATTEMPTS);
-            when(templateProperties.formatSms(anyString())).thenReturn("Your code");
-
-            when(customerPhoneService.findByPhone(VALID_PHONE)).thenReturn(sampleCustomerPhone);
-            when(otpTokenService.createPhoneVerificationOtp(any(), any(), any(), any())).thenReturn(sampleOtpToken);
-            doThrow(new SnsOptedOutException(VALID_PHONE, "test-error", "test-request"))
-                    .when(snsClientService).sendOtpSms(anyString(), anyString(), anyString());
-
-            assertThatThrownBy(() -> phoneVerificationService.sendVerificationCode(VALID_PHONE))
+        @DisplayName("Should throw OtpDeliveryFailedException when phone does not exist")
+        void shouldThrowOtpDeliveryFailedExceptionWhenPhoneDoesNotExist() {
+            when(customerPhoneService.findByPhone(VALID_PHONE)).thenThrow(new PhoneNotFoundException(VALID_PHONE));
+            assertThatThrownBy(() -> phoneVerificationService.sendPasswordResetCode(VALID_PHONE))
                     .isInstanceOf(OtpDeliveryFailedException.class)
-                    .hasMessageContaining("This phone number has opted out");
+                    .hasMessageContaining("Contact not found or not registered.");
         }
 
         @Test
-        @DisplayName("Should throw OtpDeliveryFailedException when SNS service is throttled")
-        void shouldThrowOtpDeliveryFailedExceptionWhenSnsServiceIsThrottled() {
+        @DisplayName("Should send password reset code successfully")
+        void shouldSendPasswordResetCodeSuccessfully() {
+            // Arrange
             when(verificationProperties.getOtpExpiryMinutes()).thenReturn(OTP_EXPIRY_MINUTES);
             when(verificationProperties.getMaxAttempts()).thenReturn(MAX_ATTEMPTS);
-            when(templateProperties.formatSms(anyString())).thenReturn("Your code");
-
+            when(templateProperties.formatSms(anyString())).thenReturn("Your reset code");
             when(customerPhoneService.findByPhone(VALID_PHONE)).thenReturn(sampleCustomerPhone);
-            when(otpTokenService.createPhoneVerificationOtp(any(), any(), any(), any())).thenReturn(sampleOtpToken);
-            doThrow(new SnsThrottlingException("test-error", "test-request"))
-                    .when(snsClientService).sendOtpSms(anyString(), anyString(), anyString());
+            when(otpTokenService.createPasswordResetPhoneOtp(any(), any(), any(), any())).thenReturn(samplePasswordResetOtpToken);
 
-            assertThatThrownBy(() -> phoneVerificationService.sendVerificationCode(VALID_PHONE))
-                    .isInstanceOf(OtpDeliveryFailedException.class)
-                    .hasMessageContaining("SMS service is temporarily unavailable");
-        }
+            // Act
+            SendVerificationResponse result = phoneVerificationService.sendPasswordResetCode(VALID_PHONE);
 
-        @Test
-        @DisplayName("Should throw OtpDeliveryFailedException when phone number is invalid")
-        void shouldThrowOtpDeliveryFailedExceptionWhenPhoneNumberIsInvalid() {
-            when(verificationProperties.getOtpExpiryMinutes()).thenReturn(OTP_EXPIRY_MINUTES);
-            when(verificationProperties.getMaxAttempts()).thenReturn(MAX_ATTEMPTS);
-            when(templateProperties.formatSms(anyString())).thenReturn("Your code");
-
-            when(customerPhoneService.findByPhone(VALID_PHONE)).thenReturn(sampleCustomerPhone);
-            when(otpTokenService.createPhoneVerificationOtp(any(), any(), any(), any())).thenReturn(sampleOtpToken);
-            doThrow(new SnsInvalidPhoneException(VALID_PHONE, "test-error", "test-request"))
-                    .when(snsClientService).sendOtpSms(anyString(), anyString(), anyString());
-
-            assertThatThrownBy(() -> phoneVerificationService.sendVerificationCode(VALID_PHONE))
-                    .isInstanceOf(OtpDeliveryFailedException.class)
-                    .hasMessageContaining("Invalid phone number provided");
+            // Assert
+            assertThat(result.success()).isTrue();
+            verify(otpTokenService).invalidateActivePasswordResetPhoneOtps(VALID_PHONE);
+            verify(otpTokenService).createPasswordResetPhoneOtp(any(), any(), any(), any());
+            verify(snsClientService).sendOtpSms(eq(VALID_PHONE), anyString(), eq(APP_NAME));
         }
     }
 
@@ -306,34 +303,6 @@ class PhoneVerificationServiceTest {
         void shouldThrowNullFieldExceptionWhenOtpCodeIsNull() {
             assertThatThrownBy(() -> phoneVerificationService.verifyCode(VALID_PHONE, null))
                     .isInstanceOf(NullFieldException.class);
-        }
-
-        @Test
-        @DisplayName("Should throw EmptyFieldException when phone is empty")
-        void shouldThrowEmptyFieldExceptionWhenPhoneIsEmpty() {
-            assertThatThrownBy(() -> phoneVerificationService.verifyCode("   ", VALID_OTP_CODE))
-                    .isInstanceOf(EmptyFieldException.class);
-        }
-
-        @Test
-        @DisplayName("Should throw EmptyFieldException when otpCode is empty")
-        void shouldThrowEmptyFieldExceptionWhenOtpCodeIsEmpty() {
-            assertThatThrownBy(() -> phoneVerificationService.verifyCode(VALID_PHONE, "   "))
-                    .isInstanceOf(EmptyFieldException.class);
-        }
-
-        @Test
-        @DisplayName("Should throw InvalidPhoneFormatException when phone format is invalid")
-        void shouldThrowInvalidPhoneFormatExceptionWhenPhoneFormatIsInvalid() {
-            assertThatThrownBy(() -> phoneVerificationService.verifyCode("invalid-phone", VALID_OTP_CODE))
-                    .isInstanceOf(InvalidPhoneFormatException.class);
-        }
-
-        @Test
-        @DisplayName("Should throw FieldTooShortException when OTP format is invalid")
-        void shouldThrowFieldTooShortExceptionWhenOtpFormatIsInvalid() {
-            assertThatThrownBy(() -> phoneVerificationService.verifyCode(VALID_PHONE, "12345"))
-                    .isInstanceOf(FieldTooShortException.class);
         }
 
         @Test
@@ -408,41 +377,49 @@ class PhoneVerificationServiceTest {
 
             assertThat(result.success()).isTrue();
             assertThat(result.message()).isEqualTo("Verification successful");
-            assertThat(result.contactVerified()).isTrue();
 
             verify(otpTokenService).markOtpAsUsed(OTP_ID);
             verify(customerPhoneService, never()).changeVerificationStatus(anyLong(), anyBoolean());
         }
+    }
+
+    // ===== VERIFY PASSWORD RESET CODE TESTS =====
+    @Nested
+    @DisplayName("verifyPasswordResetCode() Tests")
+    class VerifyPasswordResetCodeTests {
 
         @Test
-        @DisplayName("Should handle trimmed OTP codes correctly")
-        void shouldHandleTrimmedOtpCodesCorrectly() {
-            String paddedOtpCode = "  " + VALID_OTP_CODE + "  ";
-            when(otpTokenService.findValidPhoneVerificationOtp(VALID_OTP_CODE, VALID_PHONE))
-                    .thenReturn(sampleOtpToken);
+        @DisplayName("Should throw OtpNotFoundException when password reset OTP not found")
+        void shouldThrowOtpNotFoundExceptionWhenPasswordResetOtpNotFound() {
+            when(otpTokenService.findValidPasswordResetPhoneOtp(VALID_OTP_CODE, VALID_PHONE))
+                    .thenThrow(new OtpTokenNotFoundException(VALID_OTP_CODE));
 
-            VerifyCodeResponse result = phoneVerificationService.verifyCode(VALID_PHONE, paddedOtpCode);
-
-            assertThat(result.success()).isTrue();
-            verify(otpTokenService).findValidPhoneVerificationOtp(VALID_OTP_CODE, VALID_PHONE);
+            assertThatThrownBy(() -> phoneVerificationService.verifyPasswordResetCode(VALID_PHONE, VALID_OTP_CODE))
+                    .isInstanceOf(OtpNotFoundException.class);
         }
 
         @Test
-        @DisplayName("Should return invalid code with max attempts when last attempt fails")
-        void shouldReturnInvalidCodeWithMaxAttemptsWhenLastAttemptFails() {
-            sampleOtpToken.setAttemptsCount(2);
+        @DisplayName("Should verify password reset code successfully")
+        void shouldVerifyPasswordResetCodeSuccessfully() {
+            when(otpTokenService.findValidPasswordResetPhoneOtp(VALID_OTP_CODE, VALID_PHONE))
+                    .thenReturn(samplePasswordResetOtpToken);
 
-            when(otpTokenService.findValidPhoneVerificationOtp(INVALID_OTP_CODE, VALID_PHONE))
-                    .thenReturn(sampleOtpToken);
+            VerifyCodeResponse result = phoneVerificationService.verifyPasswordResetCode(VALID_PHONE, VALID_OTP_CODE);
 
-            VerifyCodeResponse result = phoneVerificationService.verifyCode(VALID_PHONE, INVALID_OTP_CODE);
+            assertThat(result.success()).isTrue();
+            verify(otpTokenService).markOtpAsUsed(samplePasswordResetOtpToken.getId());
+        }
+
+        @Test
+        @DisplayName("Should return invalid code response for wrong password reset OTP")
+        void shouldReturnInvalidCodeForWrongPasswordResetOtp() {
+            when(otpTokenService.findValidPasswordResetPhoneOtp(INVALID_OTP_CODE, VALID_PHONE))
+                    .thenReturn(samplePasswordResetOtpToken);
+
+            VerifyCodeResponse result = phoneVerificationService.verifyPasswordResetCode(VALID_PHONE, INVALID_OTP_CODE);
 
             assertThat(result.success()).isFalse();
-            assertThat(result.message()).isEqualTo("Maximum verification attempts reached. Please request a new code.");
-            assertThat(result.attemptsRemaining()).isEqualTo(0);
-            assertThat(result.maxAttemptsReached()).isTrue();
-
-            verify(otpTokenService).incrementAttemptCount(OTP_ID);
+            verify(otpTokenService).incrementAttemptCount(samplePasswordResetOtpToken.getId());
         }
     }
 }

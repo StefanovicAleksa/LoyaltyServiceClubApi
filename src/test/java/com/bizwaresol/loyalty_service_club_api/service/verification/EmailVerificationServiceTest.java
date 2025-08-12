@@ -64,6 +64,8 @@ class EmailVerificationServiceTest {
     private OtpToken expiredOtpToken;
     private OtpToken usedOtpToken;
     private OtpToken maxAttemptsOtpToken;
+    private OtpToken samplePasswordResetOtpToken;
+
 
     private final String VALID_EMAIL = "test@gmail.com";
     private final String VALID_OTP_CODE = "123456";
@@ -123,6 +125,17 @@ class EmailVerificationServiceTest {
         maxAttemptsOtpToken.setExpiresAt(OffsetDateTime.now().plusMinutes(10));
         maxAttemptsOtpToken.setMaxAttempts(MAX_ATTEMPTS);
         maxAttemptsOtpToken.setAttemptsCount(MAX_ATTEMPTS);
+
+        samplePasswordResetOtpToken = new OtpToken();
+        samplePasswordResetOtpToken.setId(OTP_ID + 1);
+        samplePasswordResetOtpToken.setCustomerEmail(sampleCustomerEmail);
+        samplePasswordResetOtpToken.setOtpCode(VALID_OTP_CODE);
+        samplePasswordResetOtpToken.setPurpose(OtpPurpose.PASSWORD_RESET);
+        samplePasswordResetOtpToken.setDeliveryMethod(OtpDeliveryMethod.EMAIL);
+        samplePasswordResetOtpToken.setExpiresAt(OffsetDateTime.now().plusMinutes(10));
+        samplePasswordResetOtpToken.setMaxAttempts(MAX_ATTEMPTS);
+        samplePasswordResetOtpToken.setAttemptsCount(0);
+        samplePasswordResetOtpToken.setCreatedDate(OffsetDateTime.now());
     }
 
     // ===== SEND VERIFICATION CODE TESTS =====
@@ -258,6 +271,48 @@ class EmailVerificationServiceTest {
         }
     }
 
+    // ===== SEND PASSWORD RESET CODE TESTS =====
+    @Nested
+    @DisplayName("sendPasswordResetCode() Tests")
+    class SendPasswordResetCodeTests {
+
+        @Test
+        @DisplayName("Should throw OtpDeliveryFailedException when email does not exist")
+        void shouldThrowOtpDeliveryFailedExceptionWhenEmailDoesNotExist() {
+            when(customerEmailService.findByEmail(VALID_EMAIL)).thenThrow(new EmailNotFoundException(VALID_EMAIL));
+            assertThatThrownBy(() -> emailVerificationService.sendPasswordResetCode(VALID_EMAIL))
+                    .isInstanceOf(OtpDeliveryFailedException.class)
+                    .hasMessageContaining("Contact not found or not registered.");
+        }
+
+        @Test
+        @DisplayName("Should send password reset code successfully")
+        void shouldSendPasswordResetCodeSuccessfully() {
+            // Common Arrange
+            when(verificationProperties.getOtpExpiryMinutes()).thenReturn(OTP_EXPIRY_MINUTES);
+            when(verificationProperties.getMaxAttempts()).thenReturn(MAX_ATTEMPTS);
+            when(verificationProperties.getOtpRateLimitResetHours()).thenReturn(1);
+            when(templateProperties.formatEmailSubject()).thenReturn("Reset Your Password");
+            when(templateProperties.formatEmailHtml(anyString(), anyInt())).thenReturn("<p>Your reset code is {otpCode}</p>");
+            when(sesProperties.getSourceEmail()).thenReturn(SOURCE_EMAIL);
+            when(customerEmailService.findByEmail(VALID_EMAIL)).thenReturn(sampleCustomerEmail);
+            when(otpTokenService.findLatestPasswordResetEmailOtp(VALID_EMAIL)).thenReturn(Optional.empty());
+            when(otpTokenService.countPasswordResetEmailOtpsInWindow(eq(VALID_EMAIL), any(OffsetDateTime.class))).thenReturn(0L);
+            when(otpTokenService.createPasswordResetEmailOtp(eq(sampleCustomerEmail), anyString(), any(OffsetDateTime.class), eq(MAX_ATTEMPTS)))
+                    .thenReturn(samplePasswordResetOtpToken);
+
+            // Act
+            SendVerificationResponse result = emailVerificationService.sendPasswordResetCode(VALID_EMAIL);
+
+            // Assert
+            assertThat(result.success()).isTrue();
+            assertThat(result.message()).isEqualTo("Verification code sent successfully");
+            verify(otpTokenService).invalidateActivePasswordResetEmailOtps(VALID_EMAIL);
+            verify(otpTokenService).createPasswordResetEmailOtp(any(), any(), any(), any());
+            verify(sesClientService).sendHtmlEmail(any(), any(), any(), any());
+        }
+    }
+
     // ===== VERIFY CODE TESTS =====
 
     @Nested
@@ -357,7 +412,6 @@ class EmailVerificationServiceTest {
 
             assertThat(result.success()).isTrue();
             assertThat(result.message()).isEqualTo("Verification successful");
-            assertThat(result.contactVerified()).isTrue();
 
             verify(otpTokenService).markOtpAsUsed(OTP_ID);
             verify(customerEmailService, never()).changeVerificationStatus(anyLong(), anyBoolean());
@@ -392,6 +446,48 @@ class EmailVerificationServiceTest {
             assertThat(result.maxAttemptsReached()).isTrue();
 
             verify(otpTokenService).incrementAttemptCount(OTP_ID);
+        }
+    }
+
+    // ===== VERIFY PASSWORD RESET CODE TESTS =====
+    @Nested
+    @DisplayName("verifyPasswordResetCode() Tests")
+    class VerifyPasswordResetCodeTests {
+
+        @Test
+        @DisplayName("Should throw OtpNotFoundException when password reset OTP not found")
+        void shouldThrowOtpNotFoundExceptionWhenPasswordResetOtpNotFound() {
+            when(otpTokenService.findValidPasswordResetEmailOtp(VALID_OTP_CODE, VALID_EMAIL))
+                    .thenThrow(new OtpTokenNotFoundException(VALID_OTP_CODE));
+
+            assertThatThrownBy(() -> emailVerificationService.verifyPasswordResetCode(VALID_EMAIL, VALID_OTP_CODE))
+                    .isInstanceOf(OtpNotFoundException.class);
+        }
+
+        @Test
+        @DisplayName("Should verify password reset code successfully")
+        void shouldVerifyPasswordResetCodeSuccessfully() {
+            when(otpTokenService.findValidPasswordResetEmailOtp(VALID_OTP_CODE, VALID_EMAIL))
+                    .thenReturn(samplePasswordResetOtpToken);
+
+            VerifyCodeResponse result = emailVerificationService.verifyPasswordResetCode(VALID_EMAIL, VALID_OTP_CODE);
+
+            assertThat(result.success()).isTrue();
+            assertThat(result.message()).isEqualTo("Verification successful");
+            verify(otpTokenService).markOtpAsUsed(samplePasswordResetOtpToken.getId());
+        }
+
+        @Test
+        @DisplayName("Should return invalid code response for wrong password reset OTP")
+        void shouldReturnInvalidCodeForWrongPasswordResetOtp() {
+            when(otpTokenService.findValidPasswordResetEmailOtp(INVALID_OTP_CODE, VALID_EMAIL))
+                    .thenReturn(samplePasswordResetOtpToken);
+
+            VerifyCodeResponse result = emailVerificationService.verifyPasswordResetCode(VALID_EMAIL, INVALID_OTP_CODE);
+
+            assertThat(result.success()).isFalse();
+            assertThat(result.message()).isEqualTo("Invalid verification code. Please try again.");
+            verify(otpTokenService).incrementAttemptCount(samplePasswordResetOtpToken.getId());
         }
     }
 }

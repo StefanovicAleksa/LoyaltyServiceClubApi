@@ -11,6 +11,7 @@ import com.bizwaresol.loyalty_service_club_api.data.dto.verification.response.Ve
 import com.bizwaresol.loyalty_service_club_api.domain.entity.CustomerEmail;
 import com.bizwaresol.loyalty_service_club_api.domain.entity.OtpToken;
 import com.bizwaresol.loyalty_service_club_api.domain.enums.OtpDeliveryMethod;
+import com.bizwaresol.loyalty_service_club_api.domain.enums.OtpPurpose;
 import com.bizwaresol.loyalty_service_club_api.exception.security.auth.customer.otp.sending.OtpSendingException;
 import com.bizwaresol.loyalty_service_club_api.exception.security.auth.customer.otp.verification.OtpVerificationException;
 import com.bizwaresol.loyalty_service_club_api.exception.validation.ValidationException;
@@ -52,161 +53,167 @@ public class EmailVerificationService {
     }
 
     /**
-     * Sends email verification OTP code
+     * Sends email verification OTP code.
      */
     @Transactional
     public SendVerificationResponse sendVerificationCode(String email) {
-        // 1. Validate input first to fail fast
+        return sendCode(email, OtpPurpose.EMAIL_VERIFICATION);
+    }
+
+    /**
+     * Sends a password reset OTP code via email.
+     */
+    @Transactional
+    public SendVerificationResponse sendPasswordResetCode(String email) {
+        return sendCode(email, OtpPurpose.PASSWORD_RESET);
+    }
+
+    /**
+     * Verifies an email OTP code for account verification.
+     */
+    @Transactional
+    public VerifyCodeResponse verifyCode(String email, String otpCode) {
+        return verify(email, otpCode, OtpPurpose.EMAIL_VERIFICATION);
+    }
+
+    /**
+     * Verifies an email OTP code for password reset.
+     */
+    @Transactional
+    public VerifyCodeResponse verifyPasswordResetCode(String email, String otpCode) {
+        return verify(email, otpCode, OtpPurpose.PASSWORD_RESET);
+    }
+
+
+    // ===== PRIVATE GENERIC METHODS =====
+
+    private SendVerificationResponse sendCode(String email, OtpPurpose purpose) {
         DataValidator.validateEmail(email, "email");
 
         try {
-            // 2. Validate and find CustomerEmail entity
             CustomerEmail customerEmail = customerEmailService.findByEmail(email);
 
-            // 3. Check rate limits
-            SendVerificationResponse rateLimitCheck = checkRateLimits(email);
+            SendVerificationResponse rateLimitCheck = checkRateLimits(email, purpose);
             if (!rateLimitCheck.success()) {
                 return rateLimitCheck;
             }
 
-            // 4. Invalidate any existing active OTPs
-            otpTokenService.invalidateActiveEmailVerificationOtps(email);
+            // Invalidate existing OTPs for the same purpose
+            if (purpose == OtpPurpose.EMAIL_VERIFICATION) {
+                otpTokenService.invalidateActiveEmailVerificationOtps(email);
+            } else if (purpose == OtpPurpose.PASSWORD_RESET) {
+                otpTokenService.invalidateActivePasswordResetEmailOtps(email);
+            }
 
-            // 5. Generate new OTP
             String otpCode = OtpToken.generateOtpCode();
             OffsetDateTime expiresAt = OffsetDateTime.now().plusMinutes(verificationProperties.getOtpExpiryMinutes());
 
-            // 6. Create OTP token in database
-            otpTokenService.createEmailVerificationOtp(
-                    customerEmail, otpCode, expiresAt, verificationProperties.getMaxAttempts());
+            // Create new OTP for the specified purpose
+            if (purpose == OtpPurpose.EMAIL_VERIFICATION) {
+                otpTokenService.createEmailVerificationOtp(customerEmail, otpCode, expiresAt, verificationProperties.getMaxAttempts());
+            } else if (purpose == OtpPurpose.PASSWORD_RESET) {
+                otpTokenService.createPasswordResetEmailOtp(customerEmail, otpCode, expiresAt, verificationProperties.getMaxAttempts());
+            }
 
-            // 7. Send email via SES
             sendOtpEmail(email, otpCode);
 
-            // 8. Return success response
             return SendVerificationResponse.success(email, OtpDeliveryMethod.EMAIL);
 
         } catch (ValidationException | OtpSendingException e) {
-            // Re-throw expected business and validation exceptions directly
             throw e;
         } catch (Exception e) {
-            // Map only unexpected exceptions
             throw OtpVerificationErrorMapper.mapToSendingException(e, email, "email");
         }
     }
 
-    /**
-     * Verifies email OTP code
-     */
-    @Transactional
-    public VerifyCodeResponse verifyCode(String email, String otpCode) {
-        // 1. Validate input first to fail fast
+    private VerifyCodeResponse verify(String email, String otpCode, OtpPurpose purpose) {
         DataValidator.validateEmail(email, "email");
         DataValidator.validateOtpCode(otpCode, "otpCode");
         String trimmedOtp = otpCode.trim();
 
         try {
-            // 2. Find valid OTP token
-            OtpToken otpToken = otpTokenService.findValidEmailVerificationOtp(trimmedOtp, email);
+            OtpToken otpToken;
+            if (purpose == OtpPurpose.EMAIL_VERIFICATION) {
+                otpToken = otpTokenService.findValidEmailVerificationOtp(trimmedOtp, email);
+            } else {
+                otpToken = otpTokenService.findValidPasswordResetEmailOtp(trimmedOtp, email);
+            }
 
-            // 3. Check if OTP is expired
             if (otpToken.isExpired()) {
                 return VerifyCodeResponse.expired(email, OtpDeliveryMethod.EMAIL);
             }
-
-            // 4. Check if OTP is already used
             if (otpToken.isUsed()) {
                 return VerifyCodeResponse.alreadyUsed(email, OtpDeliveryMethod.EMAIL);
             }
-
-            // 5. Check if max attempts reached
             if (otpToken.hasReachedMaxAttempts()) {
                 return VerifyCodeResponse.invalidCode(email, OtpDeliveryMethod.EMAIL, 0, true);
             }
 
-            // 6. Verify OTP code
             if (!otpToken.getOtpCode().equals(trimmedOtp)) {
-                // Increment attempt count
                 otpTokenService.incrementAttemptCount(otpToken.getId());
-
                 int remainingAttempts = otpToken.getMaxAttempts() - (otpToken.getAttemptsCount() + 1);
                 boolean maxReached = remainingAttempts <= 0;
-
                 return VerifyCodeResponse.invalidCode(email, OtpDeliveryMethod.EMAIL, remainingAttempts, maxReached);
             }
 
-            // 7. Mark OTP as used. This will now trigger the database function
-            // to update the email's verification status automatically.
+            // Mark OTP as used. If it's for EMAIL_VERIFICATION, a trigger will handle updating the email status.
+            // If it's for PASSWORD_RESET, it's simply consumed.
             otpTokenService.markOtpAsUsed(otpToken.getId());
 
-            // 8. Return success response
             return VerifyCodeResponse.success(email, OtpDeliveryMethod.EMAIL);
 
         } catch (ValidationException | OtpVerificationException e) {
-            // Re-throw expected business and validation exceptions directly
             throw e;
         } catch (Exception e) {
-            // Map only unexpected exceptions
             throw OtpVerificationErrorMapper.mapToVerificationException(e, email);
         }
     }
 
     // ===== PRIVATE HELPER METHODS =====
 
-    /**
-     * Checks rate limits for email verification OTP sending
-     * Two types of limits:
-     * 1. Resend cooldown - minimum time between any OTP requests
-     * 2. Rate limiting - escalating wait times for repeated OTP requests
-     */
-    private SendVerificationResponse checkRateLimits(String email) {
+    private SendVerificationResponse checkRateLimits(String email, OtpPurpose purpose) {
         try {
-            // Check resend cooldown (minimum time between ANY OTP requests)
-            Optional<OtpToken> latestOtp = otpTokenService.findLatestEmailVerificationOtp(email);
+            Optional<OtpToken> latestOtp;
+            if (purpose == OtpPurpose.EMAIL_VERIFICATION) {
+                latestOtp = otpTokenService.findLatestEmailVerificationOtp(email);
+            } else {
+                latestOtp = otpTokenService.findLatestPasswordResetEmailOtp(email);
+            }
+
             if (latestOtp.isPresent()) {
                 OffsetDateTime lastSent = latestOtp.get().getCreatedDate();
                 OffsetDateTime nextAllowed = lastSent.plusSeconds(verificationProperties.getResendCooldownSeconds());
-
                 if (OffsetDateTime.now().isBefore(nextAllowed)) {
                     long secondsRemaining = java.time.Duration.between(OffsetDateTime.now(), nextAllowed).getSeconds();
-                    return SendVerificationResponse.cooldownActive(
-                            email, OtpDeliveryMethod.EMAIL, nextAllowed, (int) secondsRemaining);
+                    return SendVerificationResponse.cooldownActive(email, OtpDeliveryMethod.EMAIL, nextAllowed, (int) secondsRemaining);
                 }
             }
 
-            // Check rate limiting for repeated OTP RESEND requests (escalating wait times)
             OffsetDateTime rateWindowStart = OffsetDateTime.now().minusHours(verificationProperties.getOtpRateLimitResetHours());
-            long otpCountInWindow = otpTokenService.countEmailVerificationOtpsInWindow(email, rateWindowStart);
+            long otpCountInWindow;
+            if (purpose == OtpPurpose.EMAIL_VERIFICATION) {
+                otpCountInWindow = otpTokenService.countEmailVerificationOtpsInWindow(email, rateWindowStart);
+            } else {
+                otpCountInWindow = otpTokenService.countPasswordResetEmailOtpsInWindow(email, rateWindowStart);
+            }
 
-            // Calculate wait time for next OTP REQUEST (not verification attempt)
             int nextAttemptNumber = (int) otpCountInWindow + 1;
             int waitSeconds = verificationProperties.getWaitTimeForAttempt(nextAttemptNumber);
-
             if (waitSeconds > 0) {
                 OffsetDateTime nextAllowed = OffsetDateTime.now().plusSeconds(waitSeconds);
-
-                return SendVerificationResponse.rateLimited(
-                        email, OtpDeliveryMethod.EMAIL, nextAllowed, waitSeconds);
+                return SendVerificationResponse.rateLimited(email, OtpDeliveryMethod.EMAIL, nextAllowed, waitSeconds);
             }
 
             return SendVerificationResponse.success(email, OtpDeliveryMethod.EMAIL);
 
         } catch (Exception e) {
-            // If rate limit check fails, allow the operation but log the error
             return SendVerificationResponse.success(email, OtpDeliveryMethod.EMAIL);
         }
     }
 
-    /**
-     * Sends OTP email via SES (HTML only - simpler and more reliable)
-     */
     private void sendOtpEmail(String email, String otpCode) {
         String subject = templateProperties.formatEmailSubject();
         String htmlContent = templateProperties.formatEmailHtml(otpCode, verificationProperties.getOtpExpiryMinutes());
-
-        // Send HTML email (most modern email clients support HTML)
-        // Let exceptions propagate to be handled by the main method's try-catch block.
-        sesClientService.sendHtmlEmail(
-                sesProperties.getSourceEmail(), email, subject, htmlContent);
+        sesClientService.sendHtmlEmail(sesProperties.getSourceEmail(), email, subject, htmlContent);
     }
 }
